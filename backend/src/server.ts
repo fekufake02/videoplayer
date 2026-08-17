@@ -10,6 +10,9 @@ import routes from './routes';
 
 const app = express();
 
+// Enable trust proxy for Render / Vercel proxy headers
+app.set('trust proxy', 1);
+
 // HTTP Security Headers
 app.use(
   helmet({
@@ -42,7 +45,7 @@ app.use(
     cookie: {
       httpOnly: true,
       secure: config.isProd,
-      sameSite: 'lax',
+      sameSite: config.isProd ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     },
   })
