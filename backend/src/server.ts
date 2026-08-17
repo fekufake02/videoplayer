@@ -79,10 +79,13 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 // Initialize database and start listening if not in test environment
 if (process.env.NODE_ENV !== 'test') {
-  connectDB().then(async () => {
-    await ensureAdminUser();
-    app.listen(config.port, () => {
-      console.log(`Private Video Library Backend running on ${config.backendUrl}`);
+  const port = config.port || 10000;
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Private Video Library Backend running on port ${port}`);
+    connectDB().then(async () => {
+      await ensureAdminUser();
+    }).catch((err) => {
+      console.error('DB init warning:', err);
     });
   });
 }
