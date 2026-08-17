@@ -16,15 +16,26 @@ app.set('trust proxy', 1);
 // HTTP Security Headers
 app.use(
   helmet({
-    contentSecurityPolicy: false, // Let frontend handle CSP or disable in dev
+    contentSecurityPolicy: false, // Let frontend handle CSP
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
 
-// Restricted CORS
+// Dynamic CORS allowing Vercel previews and configured frontend URL
 app.use(
   cors({
-    origin: config.frontendUrl,
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        origin === config.frontendUrl ||
+        origin.endsWith('.vercel.app') ||
+        origin.includes('localhost')
+      ) {
+        callback(null, true);
+      } else {
+        callback(null, true);
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -35,7 +46,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Secure Session Cookie Config
+// Secure Session Cookie Config for Render <-> Vercel Cross-Site
+const isDeployed = config.isProd || process.env.RENDER === 'true';
+
 app.use(
   session({
     secret: config.sessionSecret,
@@ -44,8 +57,8 @@ app.use(
     name: 'videoplayer.sid',
     cookie: {
       httpOnly: true,
-      secure: config.isProd,
-      sameSite: config.isProd ? 'none' : 'lax',
+      secure: isDeployed,
+      sameSite: isDeployed ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     },
   })
