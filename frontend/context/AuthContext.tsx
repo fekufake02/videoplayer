@@ -83,6 +83,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsAuthenticated(true);
       setUser(data.user);
       if (data.settings) setSettings(data.settings);
+      sessionStorage.setItem('metime_unlocked', 'true');
       setIsLocked(false);
       setIsPrivacyActive(false);
       router.push('/');
@@ -95,6 +96,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (e) {
       // Ignore logout api errors if session already ended
     } finally {
+      sessionStorage.removeItem('metime_unlocked');
       setIsAuthenticated(false);
       setUser(null);
       setIsPrivacyActive(false);
@@ -112,11 +114,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const lockApp = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('metime_unlocked');
+    }
     setIsLocked(true);
     setIsPrivacyActive(true);
   }, []);
 
   const unlockApp = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('metime_unlocked', 'true');
+    }
     setIsLocked(false);
     setIsPrivacyActive(false);
   }, []);
@@ -132,19 +140,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Tab visibility privacy listener
+  // Window switch, Desktop switch, Tab switch & Reload Privacy Lock Listeners
   useEffect(() => {
-    if (!settings || !settings.privacyTabHidden || !isAuthenticated) return;
+    if (!isAuthenticated) return;
+
+    const handleLock = () => {
+      lockApp();
+    };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        setIsPrivacyActive(true);
+        handleLock();
       }
     };
 
+    const handleBlur = () => {
+      handleLock();
+    };
+
+    const handleBeforeUnload = () => {
+      sessionStorage.removeItem('metime_unlocked');
+    };
+
+    // Auto-lock on page reload if session unlock token is missing
+    const isUnlocked = sessionStorage.getItem('metime_unlocked') === 'true';
+    if (!isUnlocked && pathname !== '/login') {
+      lockApp();
+    }
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [settings, isAuthenticated]);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isAuthenticated, lockApp, pathname]);
 
   // Inactivity auto-lock timer
   useEffect(() => {

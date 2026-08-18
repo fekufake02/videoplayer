@@ -20,6 +20,7 @@ const completeUploadSchema = z.object({
   title: z.string().min(1),
   originalFilename: z.string().min(1),
   storageKey: z.string().min(1),
+  thumbnailKey: z.string().optional(),
   mimeType: z.string().min(1),
   size: z.number().positive(),
   duration: z.number().optional(),
@@ -108,10 +109,22 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
         break;
     }
 
-    const [videos, total] = await Promise.all([
+    const [rawVideos, total] = await Promise.all([
       Video.find(query).sort(sortOption).skip(skip).limit(limit),
       Video.countDocuments(query),
     ]);
+
+    const videos = await Promise.all(
+      rawVideos.map(async (v) => {
+        const obj = v.toObject();
+        if (v.thumbnailKey) {
+          try {
+            (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(v.thumbnailKey, 3600);
+          } catch (e) {}
+        }
+        return obj;
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -244,7 +257,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    const { title, originalFilename, storageKey, mimeType, size, duration, tags, notes } = parsed.data;
+    const { title, originalFilename, storageKey, thumbnailKey, mimeType, size, duration, tags, notes } = parsed.data;
 
     // Verify file actually landed in Backblaze B2
     const exists = await b2Service.checkObjectExists(storageKey);
@@ -260,6 +273,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
       title,
       originalFilename,
       storageKey,
+      thumbnailKey: thumbnailKey || undefined,
       mimeType,
       size,
       duration: duration || 0,
@@ -276,6 +290,42 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
     res.status(500).json({
       success: false,
       error: { code: 'UPLOAD_COMPLETE_FAILED', message: 'Failed to register video metadata.' },
+    });
+  }
+};
+
+export const attachThumbnail = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { thumbnailKey } = req.body;
+    if (!thumbnailKey || typeof thumbnailKey !== 'string') {
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'thumbnailKey is required.' },
+      });
+      return;
+    }
+
+    const video = await Video.findById(req.params.id);
+    if (!video) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Video not found.' },
+      });
+      return;
+    }
+
+    video.thumbnailKey = thumbnailKey;
+    await video.save();
+
+    res.status(200).json({
+      success: true,
+      video,
+    });
+  } catch (error) {
+    console.error('Attach thumbnail error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to attach video thumbnail.' },
     });
   }
 };
@@ -390,10 +440,18 @@ export const getStreamUrl = async (req: AuthenticatedRequest, res: Response): Pr
     }
 
     const streamUrl = await b2Service.getPresignedStreamUrl(video.storageKey, 900); // 15 min expiration
+    let thumbnailUrl: string | undefined = undefined;
+
+    if (video.thumbnailKey) {
+      try {
+        thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600); // 1 hr expiration
+      } catch (e) {}
+    }
 
     res.status(200).json({
       success: true,
       streamUrl,
+      thumbnailUrl,
     });
   } catch (error) {
     console.error('Stream URL generation error:', error);

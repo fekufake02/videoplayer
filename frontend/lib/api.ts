@@ -129,6 +129,7 @@ class ApiClient {
     title: string;
     originalFilename: string;
     storageKey: string;
+    thumbnailKey?: string;
     mimeType: string;
     size: number;
     duration?: number;
@@ -138,6 +139,13 @@ class ApiClient {
     return this.request<{ success: boolean; video: IVideo }>('/videos/upload/complete', {
       method: 'POST',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async attachThumbnail(id: string, thumbnailKey: string) {
+    return this.request<{ success: boolean; video: IVideo }>(`/videos/${id}/thumbnail`, {
+      method: 'POST',
+      body: JSON.stringify({ thumbnailKey }),
     });
   }
 

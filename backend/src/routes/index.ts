@@ -23,6 +23,7 @@ router.post('/videos/upload/complete', requireAuth, videoController.completeUplo
 // Single Video Operations
 router.get('/videos/:id', requireAuth, videoController.getVideoDetails);
 router.patch('/videos/:id', requireAuth, videoController.updateVideoMetadata);
+router.post('/videos/:id/thumbnail', requireAuth, videoController.attachThumbnail);
 router.delete('/videos/:id', requireAuth, videoController.deleteVideo);
 
 // Secure Temporary Presigned Stream & Download URLs

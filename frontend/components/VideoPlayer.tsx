@@ -20,6 +20,7 @@ import {
   Lock,
   ArrowLeft,
   Sparkles,
+  PictureInPicture,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -34,10 +35,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
   const { settings, isPrivacyActive, isLocked, togglePrivacyMode, lockApp } = useAuth();
 
-  // Exit HTML5 fullscreen whenever Privacy Mode or Panic Lock is activated
+  // Exit HTML5 fullscreen and pause video whenever Privacy Mode or Panic Lock is activated
   useEffect(() => {
-    if ((isPrivacyActive || isLocked) && document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
+    if (isPrivacyActive || isLocked) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      if (videoRef.current && !videoRef.current.paused) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      }
     }
   }, [isPrivacyActive, isLocked]);
 
@@ -278,6 +285,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     };
   }, [video._id]);
 
+  const togglePictureInPicture = async () => {
+    if (!videoRef.current) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (document.pictureInPictureEnabled) {
+        await videoRef.current.requestPictureInPicture();
+      }
+    } catch (e) {
+      console.warn('Picture in Picture error:', e);
+    }
+  };
+
   const formatTime = (secs: number) => {
     const hrs = Math.floor(secs / 3600);
     const mins = Math.floor((secs % 3600) / 60);
@@ -318,11 +338,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
       {/* Resume Playback Prompt Banner */}
       {showResumePrompt && (
-        <div className="absolute top-6 left-6 right-6 z-30 glass-panel bg-slate-900/90 p-4 rounded-xl border border-indigo-500/40 flex items-center justify-between shadow-2xl animate-fade-in">
+        <div className="absolute top-6 left-6 right-6 z-30 glass-panel bg-zinc-950/90 p-4 rounded-xl border border-white/10 flex items-center justify-between shadow-2xl animate-fade-in">
           <div className="flex items-center gap-3">
-            <Sparkles className="w-5 h-5 text-indigo-400" />
+            <Sparkles className="w-5 h-5 text-amber-400" />
             <span className="text-sm font-medium text-white">
-              Resume playback from <span className="font-mono text-indigo-300">{resumePositionFormatted}</span>?
+              Resume playback from <span className="font-mono text-amber-300">{resumePositionFormatted}</span>?
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -331,13 +351,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 if (videoRef.current) videoRef.current.currentTime = video.lastPosition;
                 setShowResumePrompt(false);
               }}
-              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md"
+              className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold rounded-lg shadow-md"
             >
               Resume
             </button>
             <button
               onClick={() => setShowResumePrompt(false)}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg"
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg"
             >
               Start Over
             </button>
@@ -355,7 +375,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         <div className="flex items-center justify-between pointer-events-auto">
           <Link
             href="/"
-            className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700/60 flex items-center gap-2 text-xs font-medium backdrop-blur-md"
+            className="p-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 flex items-center gap-2 text-xs font-medium backdrop-blur-md"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Library</span>
@@ -369,14 +389,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             <button
               onClick={handleTogglePrivacy}
               title="Privacy Mode (P)"
-              className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/60 backdrop-blur-md"
+              className="p-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 backdrop-blur-md"
             >
               <EyeOff className="w-4 h-4" />
             </button>
             <button
               onClick={handleLockApp}
               title="Panic Lock (Ctrl+Shift+L)"
-              className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-amber-400 border border-slate-700/60 backdrop-blur-md"
+              className="p-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md"
             >
               <Lock className="w-4 h-4" />
             </button>
@@ -387,7 +407,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         <div className="self-center pointer-events-auto">
           <button
             onClick={togglePlay}
-            className="w-16 h-16 rounded-full bg-indigo-600/90 text-white flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-indigo-500 transition-all backdrop-blur-md"
+            className="w-16 h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-amber-300 transition-all backdrop-blur-md"
           >
             {isPlaying ? (
               <Pause className="w-7 h-7 fill-current" />
@@ -518,11 +538,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 </select>
               </div>
 
+              {/* Picture-in-Picture Button */}
+              <button
+                onClick={togglePictureInPicture}
+                title="Picture in Picture (Floating window)"
+                className="p-2 text-zinc-300 hover:text-white"
+              >
+                <PictureInPicture className="w-5 h-5" />
+              </button>
+
               {/* Fullscreen Button */}
               <button
                 onClick={toggleFullscreen}
                 title="Toggle Fullscreen (F)"
-                className="p-2 text-slate-300 hover:text-white"
+                className="p-2 text-zinc-300 hover:text-white"
               >
                 {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
               </button>

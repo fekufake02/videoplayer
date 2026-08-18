@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { IVideo } from '../types';
 import { Play, Heart, MoreVertical, Clock, Download, Edit3, Trash2, Tag } from 'lucide-react';
 import { api } from '../lib/api';
+import { generateAndUploadThumbnail } from '../lib/thumbnailGenerator';
 
 interface VideoCardProps {
   video: IVideo;
@@ -95,13 +96,31 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         onMouseLeave={() => setIsHovered(false)}
         className="relative aspect-video bg-zinc-950 overflow-hidden flex items-center justify-center"
       >
-        {/* Video First Frame Preview on Hover */}
-        {isHovered && streamUrl ? (
+        {/* Static B2 WebP Thumbnail */}
+        {video.thumbnailUrl ? (
+          <img
+            src={video.thumbnailUrl}
+            alt={video.title}
+            loading="lazy"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          />
+        ) : isHovered && streamUrl ? (
           <video
             src={`${streamUrl}#t=0.5`}
             preload="metadata"
             muted
             playsInline
+            onLoadedData={async (e) => {
+              // Auto-generate WebP thumbnail for existing videos without a thumbnailKey
+              if (!video.thumbnailKey) {
+                try {
+                  const key = await generateAndUploadThumbnail(streamUrl, video.originalFilename);
+                  if (key) {
+                    await api.attachThumbnail(video._id, key);
+                  }
+                } catch (err) {}
+              }
+            }}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
         ) : (

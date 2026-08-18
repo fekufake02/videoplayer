@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from 'react';
 import { api } from '../lib/api';
+import { generateAndUploadThumbnail } from '../lib/thumbnailGenerator';
 import { UploadCloud, X, FileVideo, CheckCircle2, AlertCircle, Trash2, Layers } from 'lucide-react';
 
 interface UploadModalProps {
@@ -150,11 +151,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           xhr.send(item.file);
         });
 
-        // Step 3: Complete metadata creation
+        // Generate WebP thumbnail locally in browser canvas (25 KB)
+        let thumbnailKey: string | undefined = undefined;
+        try {
+          const generatedKey = await generateAndUploadThumbnail(item.file, item.file.name);
+          if (generatedKey) thumbnailKey = generatedKey;
+        } catch (e) {
+          console.warn('Thumbnail generation skipped:', e);
+        }
+
+        // Step 3: Complete metadata creation with thumbnailKey
         await api.completeUpload({
           title: item.title.trim() || item.file.name,
           originalFilename: item.file.name,
           storageKey,
+          thumbnailKey,
           mimeType: item.file.type || 'video/mp4',
           size: item.file.size,
         });

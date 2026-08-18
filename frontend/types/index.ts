@@ -4,6 +4,7 @@ export interface IVideo {
   originalFilename: string;
   storageKey: string;
   thumbnailKey?: string;
+  thumbnailUrl?: string;
   mimeType: string;
   size: number;
   duration: number;

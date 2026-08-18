@@ -21,6 +21,11 @@ app.use(
   })
 );
 
+// Ultra-lightweight keep-alive health route for Render pings (2 bytes response)
+app.get(['/health', '/api/health'], (_req: Request, _res: Response) => {
+  _res.status(200).send('OK');
+});
+
 // Dynamic CORS allowing Vercel previews and configured frontend URL
 app.use(
   cors({
