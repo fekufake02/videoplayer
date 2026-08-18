@@ -100,12 +100,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-900 to-slate-850 flex items-center justify-center" />
+          <div className="absolute inset-0 bg-zinc-950 flex items-center justify-center" />
         )}
 
         {/* Hover Dark Overlay & Center Play Button */}
         <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-          <div className="w-12 h-12 rounded-full bg-indigo-600/90 text-white flex items-center justify-center shadow-xl group-hover:scale-110 group-hover:bg-indigo-500 transition-all">
+          <div className="w-12 h-12 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-xl group-hover:scale-110 group-hover:bg-amber-300 transition-all">
             <Play className="w-5 h-5 fill-current translate-x-0.5" />
           </div>
         </div>
@@ -127,9 +127,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
         {/* Bottom Playback Progress Bar */}
         {progress > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-800">
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-800">
             <div
-              className="h-full bg-indigo-500 transition-all duration-300"
+              className="h-full bg-amber-400 transition-all duration-300"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -148,15 +148,28 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               {video.title}
             </Link>
 
-            {/* Context Menu Button */}
-            <div className="relative">
+            {/* Context Actions */}
+            <div className="flex items-center gap-1">
+              {onEdit && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onEdit(video);
+                  }}
+                  title="Edit title & details"
+                  className="p-1 text-zinc-400 hover:text-amber-400 rounded-lg hover:bg-zinc-800/80 transition-all"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   setShowMenu((prev) => !prev);
                 }}
-                className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800/60 transition-all"
+                className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800/80 transition-all"
               >
                 <MoreVertical className="w-4 h-4" />
               </button>

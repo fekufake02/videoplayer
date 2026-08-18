@@ -114,8 +114,8 @@ export default function LibraryHomePage() {
               }}
               className={`px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
                 filter === 'all' && sort === 'recentlyAdded'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 font-bold'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20 font-extrabold'
+                  : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
               }`}
             >
               <Sparkles className="w-4 h-4" />
@@ -130,8 +130,8 @@ export default function LibraryHomePage() {
               }}
               className={`px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
                 filter === 'recentlyWatched'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 font-bold'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20 font-extrabold'
+                  : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
               }`}
             >
               <Clock className="w-4 h-4" />
@@ -146,8 +146,8 @@ export default function LibraryHomePage() {
               }}
               className={`px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
                 filter === 'favorites'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 font-bold'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20 font-extrabold'
+                  : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
               }`}
             >
               <PlayCircle className="w-4 h-4" />
@@ -162,11 +162,11 @@ export default function LibraryHomePage() {
               }}
               className={`px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
                 filter === 'all' && sort === 'mostWatched'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 font-bold'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20 font-extrabold'
+                  : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
               }`}
             >
-              <Flame className="w-4 h-4 text-amber-400" />
+              <Flame className="w-4 h-4 text-amber-500" />
               <span>Most Watched</span>
             </button>
           </div>

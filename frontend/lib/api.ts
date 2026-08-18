@@ -11,10 +11,17 @@ class ApiClient {
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
 
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
+
+    if (typeof window !== 'undefined') {
+      const storedToken = localStorage.getItem('metime_auth_token');
+      if (storedToken) {
+        headers['Authorization'] = `Bearer ${storedToken}`;
+      }
+    }
 
     const response = await fetch(url, {
       ...options,
@@ -26,8 +33,8 @@ class ApiClient {
 
     if (!response.ok) {
       if (response.status === 401) {
-        // Trigger custom unauthorized event for AuthContext to handle
         if (typeof window !== 'undefined') {
+          localStorage.removeItem('metime_auth_token');
           window.dispatchEvent(new CustomEvent('app:unauthorized'));
         }
       }
@@ -40,13 +47,21 @@ class ApiClient {
 
   // Auth Endpoints
   async login(password: string) {
-    return this.request<{ success: boolean; user: any; settings: ISettings }>('/auth/login', {
+    const res = await this.request<{ success: boolean; token?: string; user: any; settings: ISettings }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ password }),
     });
+
+    if (res.token && typeof window !== 'undefined') {
+      localStorage.setItem('metime_auth_token', res.token);
+    }
+    return res;
   }
 
   async logout() {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('metime_auth_token');
+    }
     return this.request<{ success: boolean }>('/auth/logout', {
       method: 'POST',
     });

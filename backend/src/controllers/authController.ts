@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { User } from '../models/User';
 import { Settings } from '../models/Settings';
 import { config } from '../config';
-import { AuthenticatedRequest } from '../middleware/auth';
+import { AuthenticatedRequest, generateToken, verifyToken } from '../middleware/auth';
 
 const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
@@ -84,6 +84,8 @@ export const login = async (req: AuthenticatedRequest, res: Response): Promise<v
     req.session.userId = user._id.toString();
     req.session.username = user.username;
 
+    const token = generateToken(user._id.toString(), user.username);
+
     // Fetch or create user settings
     let settings = await Settings.findOne({ userId: user._id.toString() });
     if (!settings) {
@@ -92,6 +94,7 @@ export const login = async (req: AuthenticatedRequest, res: Response): Promise<v
 
     res.status(200).json({
       success: true,
+      token,
       user: {
         id: user._id,
         username: user.username,
@@ -125,7 +128,23 @@ export const logout = async (req: AuthenticatedRequest, res: Response): Promise<
 };
 
 export const me = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  if (!req.session || !req.session.userId) {
+  let userId = req.session?.userId;
+  let username = req.session?.username;
+
+  // Fallback to Bearer token header if cookie was omitted by mobile browser
+  if (!userId) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7).trim();
+      const verified = verifyToken(token);
+      if (verified) {
+        userId = verified.userId;
+        username = verified.username;
+      }
+    }
+  }
+
+  if (!userId) {
     res.status(200).json({
       success: true,
       authenticated: false,
@@ -134,7 +153,7 @@ export const me = async (req: AuthenticatedRequest, res: Response): Promise<void
   }
 
   try {
-    const user = await User.findById(req.session.userId);
+    const user = await User.findById(userId);
     if (!user) {
       res.status(200).json({ success: true, authenticated: false });
       return;

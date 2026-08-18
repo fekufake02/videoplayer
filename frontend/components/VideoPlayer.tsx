@@ -32,7 +32,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const { settings, togglePrivacyMode, lockApp } = useAuth();
+  const { settings, isPrivacyActive, isLocked, togglePrivacyMode, lockApp } = useAuth();
+
+  // Exit HTML5 fullscreen whenever Privacy Mode or Panic Lock is activated
+  useEffect(() => {
+    if ((isPrivacyActive || isLocked) && document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, [isPrivacyActive, isLocked]);
+
+  const handleTogglePrivacy = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    togglePrivacyMode();
+  };
+
+  const handleLockApp = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    lockApp();
+  };
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -326,7 +347,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
       {/* Hover Controls Overlay */}
       <div
-        className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/60 transition-opacity duration-300 flex flex-col justify-between p-4 sm:p-6 pointer-events-none ${
+        className={`absolute inset-0 bg-black/60 transition-opacity duration-300 flex flex-col justify-between p-4 sm:p-6 pointer-events-none ${
           showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -346,14 +367,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={togglePrivacyMode}
+              onClick={handleTogglePrivacy}
               title="Privacy Mode (P)"
               className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/60 backdrop-blur-md"
             >
               <EyeOff className="w-4 h-4" />
             </button>
             <button
-              onClick={lockApp}
+              onClick={handleLockApp}
               title="Panic Lock (Ctrl+Shift+L)"
               className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-amber-400 border border-slate-700/60 backdrop-blur-md"
             >

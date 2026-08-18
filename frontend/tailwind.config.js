@@ -9,17 +9,19 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: '#0a0d14',
-        surface: '#121722',
-        'surface-hover': '#1b2232',
-        border: '#1f293d',
+        background: '#000000',
+        surface: '#09090b',
+        'surface-hover': '#18181b',
+        border: '#27272a',
         accent: {
-          DEFAULT: '#6366f1',
-          hover: '#4f46e5',
+          DEFAULT: '#facc15', // Luminous Light Yellow
+          hover: '#eab308',
+          light: '#fef08a',
+          pink: '#f472b6',  // Soft Light Pink
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-outfit)', 'Inter', 'system-ui', 'sans-serif'],
       },
     },
   },

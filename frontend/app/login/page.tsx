@@ -34,18 +34,18 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-tr from-[#07090e] via-[#0a0d14] to-[#111624]">
-      <div className="max-w-sm w-full glass-panel p-8 rounded-3xl shadow-2xl border border-slate-800 text-center flex flex-col items-center">
-        {/* Lock Icon Badge */}
-        <div className="w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-6 shadow-xl">
-          <Shield className="w-8 h-8" />
+    <main className="min-h-screen flex items-center justify-center p-4 bg-black">
+      <div className="max-w-sm w-full glass-panel p-8 rounded-3xl shadow-2xl border border-white/10 text-center flex flex-col items-center">
+        {/* Metime Emblem Logo */}
+        <div className="w-16 h-16 rounded-2xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-2xl shadow-amber-400/20 text-3xl mb-6">
+          M
         </div>
 
-        <h1 className="text-2xl font-bold tracking-tight text-white mb-1">
-          Private Library
+        <h1 className="text-3xl font-extrabold tracking-tight text-white mb-1">
+          Metime
         </h1>
-        <p className="text-xs text-slate-400 mb-6">
-          Enter password to unlock video collection.
+        <p className="text-xs text-zinc-400 mb-6">
+          Enter master password to unlock your private vault.
         </p>
 
         {error && (

@@ -51,16 +51,16 @@ export const EditMetadataModal: React.FC<EditMetadataModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="glass-panel max-w-md w-full rounded-2xl p-6 shadow-2xl border border-slate-800">
-        <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4">
+      <div className="glass-panel max-w-md w-full rounded-2xl p-6 shadow-2xl border border-white/10 bg-zinc-950/90 text-white">
+        <div className="flex items-center justify-between pb-4 mb-4 border-b border-zinc-800">
           <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <Edit3 className="w-4 h-4 text-indigo-400" />
+            <Edit3 className="w-4 h-4 text-amber-400" />
             Edit Video Details
           </h3>
           <button
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors"
+            className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -68,33 +68,35 @@ export const EditMetadataModal: React.FC<EditMetadataModalProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Title</label>
+            <label className="block text-xs font-semibold text-zinc-300 mb-1">Title</label>
             <input
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3.5 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full px-3.5 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-sm text-white focus:outline-none focus:border-amber-400"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Tags (Comma-separated)</label>
+            <label className="block text-xs font-semibold text-zinc-300 mb-1">Tags (Comma-separated)</label>
             <input
               type="text"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
-              className="w-full px-3.5 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              placeholder="e.g. tutorial, personal, favorite"
+              className="w-full px-3.5 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-sm text-white focus:outline-none focus:border-amber-400"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Notes</label>
+            <label className="block text-xs font-semibold text-zinc-300 mb-1">Notes</label>
             <textarea
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3.5 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              placeholder="Add personal notes or description..."
+              className="w-full px-3.5 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-sm text-white focus:outline-none focus:border-amber-400 resize-none"
             />
           </div>
 
@@ -102,14 +104,14 @@ export const EditMetadataModal: React.FC<EditMetadataModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-xl transition-all"
+              className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium rounded-xl border border-zinc-800 transition-all"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSaving}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-lg shadow-indigo-600/20 transition-all"
+              className="px-5 py-2 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-black text-xs font-extrabold rounded-xl shadow-lg shadow-amber-400/20 transition-all"
             >
               {isSaving ? 'Saving...' : 'Save Changes'}
             </button>

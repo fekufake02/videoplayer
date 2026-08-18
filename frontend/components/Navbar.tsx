@@ -22,13 +22,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 glass-nav px-4 lg:px-8 py-3.5 flex items-center justify-between gap-4">
-      {/* Brand Logo */}
+      {/* Metime Brand Logo */}
       <Link href="/" className="flex items-center gap-2.5 group">
-        <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-md">
-          <Shield className="w-5 h-5" />
+        <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-105 transition-all text-lg tracking-tighter">
+          M
         </div>
-        <span className="font-bold text-lg text-white tracking-tight hidden sm:inline">
-          Private Library
+        <span className="font-extrabold text-xl text-white tracking-tight hidden sm:inline">
+          Metime
         </span>
       </Link>
 
@@ -51,7 +51,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {onOpenUpload && (
           <button
             onClick={onOpenUpload}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition-all shadow-md shadow-indigo-600/20"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-amber-400/20"
           >
             <Plus className="w-4 h-4" />
             <span>Upload</span>
