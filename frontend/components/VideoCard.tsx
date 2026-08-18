@@ -22,17 +22,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   const [isFavorite, setIsFavorite] = useState(video.favorite);
   const [showMenu, setShowMenu] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
 
-  React.useEffect(() => {
-    let isMounted = true;
-    api.getStreamUrl(video._id).then((res) => {
-      if (isMounted && res?.streamUrl) {
-        setStreamUrl(res.streamUrl);
-      }
-    }).catch(() => {});
-    return () => { isMounted = false; };
-  }, [video._id]);
+  const handleMouseEnter = () => {
+    setIsHovered(true);
+    if (!streamUrl) {
+      api.getStreamUrl(video._id).then((res) => {
+        if (res?.streamUrl) setStreamUrl(res.streamUrl);
+      }).catch(() => {});
+    }
+  };
 
   const formatDuration = (seconds: number) => {
     if (!seconds || seconds <= 0) return '--:--';
@@ -89,9 +89,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   return (
     <div className="group relative glass-panel rounded-2xl overflow-hidden hover:border-indigo-500/40 transition-all duration-300 flex flex-col shadow-lg">
       {/* Thumbnail Container */}
-      <Link href={`/watch/${video._id}`} className="relative aspect-video bg-slate-900 overflow-hidden flex items-center justify-center">
-        {/* Video First Frame Thumbnail */}
-        {streamUrl ? (
+      <Link
+        href={`/watch/${video._id}`}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setIsHovered(false)}
+        className="relative aspect-video bg-zinc-950 overflow-hidden flex items-center justify-center"
+      >
+        {/* Video First Frame Preview on Hover */}
+        {isHovered && streamUrl ? (
           <video
             src={`${streamUrl}#t=0.5`}
             preload="metadata"
@@ -100,7 +105,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
         ) : (
-          <div className="absolute inset-0 bg-zinc-950 flex items-center justify-center" />
+          <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center gap-2 p-4 text-center">
+            <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 group-hover:border-amber-400/50 group-hover:text-amber-400 transition-colors">
+              <Play className="w-4 h-4 fill-current translate-x-0.5" />
+            </div>
+            <span className="text-[11px] text-zinc-500 font-mono truncate max-w-[180px]">
+              {video.originalFilename}
+            </span>
+          </div>
         )}
 
         {/* Hover Dark Overlay & Center Play Button */}
