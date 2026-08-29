@@ -189,9 +189,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   // Time Scrubbing
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTime = parseFloat(e.target.value);
-    setCurrentTime(newTime);
+    handleDirectSeek(newTime);
+  };
+
+  const handleDirectSeek = (newTime: number) => {
+    const safeTime = Math.max(0, Math.min(duration || 0, newTime));
+    setCurrentTime(safeTime);
     if (videoRef.current) {
-      videoRef.current.currentTime = newTime;
+      videoRef.current.currentTime = safeTime;
     }
   };
 
@@ -516,31 +521,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
         {/* Bottom Control Bar */}
         <div className="space-y-3 pointer-events-auto">
-          {/* Buffering Indicator - YouTube Style Gray Progress */}
+          {/* Buffering Indicator - YouTube Style Gray Progress & Scrubber */}
           <div className="flex items-center gap-3">
             <span className="font-mono text-xs text-slate-300 w-12 text-right">
               {formatTime(currentTime)}
             </span>
-            <div className="flex-1 flex flex-col gap-1">
-              {/* Progress Timeline Scrubber with Buffering Indicator */}
+            <div className="flex-1">
               <BufferingIndicator
                 bufferedRanges={bufferingState.bufferedRanges}
                 currentTime={currentTime}
                 duration={duration || 100}
                 percentBuffered={bufferingState.percentBuffered}
                 isBuffering={bufferingState.isBuffering}
-              />
-              <input
-                type="range"
-                min={0}
-                max={duration || 100}
-                step={0.1}
-                value={currentTime}
-                onChange={handleSeek}
-                className="flex-1 h-1.5 opacity-0 absolute pointer-events-auto"
-                style={{
-                  width: 'calc(100% - 24px)',
-                }}
+                onSeek={handleDirectSeek}
+                maxBufferAhead={120}
               />
             </div>
             <span className="font-mono text-xs text-slate-400 w-12">

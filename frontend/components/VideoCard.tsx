@@ -127,7 +127,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       >
         {/* Optimized Thumbnail Loader with Blurhash LQIP */}
         <ThumbnailLoader
-          src={thumbnailUrl}
+          src={thumbnailUrl || undefined}
           blurhash={video.blurhash}
           fallbackText={video.originalFilename}
           alt={video.title}

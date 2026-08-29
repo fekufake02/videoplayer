@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as authController from '../controllers/authController';
 import * as videoController from '../controllers/videoController';
 import * as settingsController from '../controllers/settingsController';
+import * as thumbnailController from '../controllers/thumbnailController';
 import { requireAuth } from '../middleware/auth';
 import { loginLimiter } from '../middleware/rateLimiter';
 
@@ -24,6 +25,8 @@ router.post('/videos/upload/complete', requireAuth, videoController.completeUplo
 router.get('/videos/:id', requireAuth, videoController.getVideoDetails);
 router.patch('/videos/:id', requireAuth, videoController.updateVideoMetadata);
 router.post('/videos/:id/thumbnail', requireAuth, videoController.attachThumbnail);
+router.get('/videos/:id/thumbnail-url', requireAuth, thumbnailController.getThumbnailUrl);
+router.post('/thumbnails/batch-generate', requireAuth, thumbnailController.batchGenerateThumbnails);
 router.delete('/videos/:id', requireAuth, videoController.deleteVideo);
 
 // Secure Temporary Presigned Stream & Download URLs

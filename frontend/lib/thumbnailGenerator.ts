@@ -7,9 +7,12 @@ import { canvasToWebP, generateBlurhashFromCanvas } from './thumbnailOptimizer';
  * Extract frame from video at specific timestamp
  */
 export async function extractVideoFrame(
-  videoUrl: string,
+  videoSource: string | File,
   timestamp: number = 0.5
 ): Promise<HTMLCanvasElement> {
+  const isFile = typeof videoSource !== 'string';
+  const videoUrl = isFile ? URL.createObjectURL(videoSource) : videoSource;
+
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
@@ -47,6 +50,9 @@ export async function extractVideoFrame(
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.removeEventListener('seeked', handleSeeked);
       video.removeEventListener('error', handleError);
+      if (isFile) {
+        URL.revokeObjectURL(videoUrl);
+      }
     };
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -61,13 +67,13 @@ export async function extractVideoFrame(
  * Generate and upload thumbnail for a video
  */
 export async function generateAndUploadThumbnail(
-  streamUrl: string,
+  videoSource: string | File,
   originalFilename: string,
   timestamp: number = 1
 ): Promise<string | null> {
   try {
     // Extract frame from video
-    const canvas = await extractVideoFrame(streamUrl, timestamp);
+    const canvas = await extractVideoFrame(videoSource, timestamp);
 
     // Generate blurhash for LQIP
     const blurhash = await generateBlurhashFromCanvas(canvas);

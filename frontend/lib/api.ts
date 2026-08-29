@@ -1,8 +1,8 @@
 import { IVideo, ISettings, HomeSections, VideoListResponse } from '../types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL
-  ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api`
-  : 'http://localhost:4000/api';
+const API_BASE_URL = typeof window !== 'undefined'
+  ? (process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : '/api')
+  : (process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : 'http://127.0.0.1:3000/api');
 
 class ApiClient {
   private streamUrlCache: Map<string, { url: string; expiry: number }> = new Map();
