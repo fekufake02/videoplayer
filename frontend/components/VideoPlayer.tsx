@@ -4,6 +4,10 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { IVideo } from '../types';
 import { api } from '../lib/api';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { useBufferedSegments } from '../hooks/useBufferedSegments';
+import { BufferingManager, estimateBitrate } from '../lib/bufferingManager';
+import { BufferingIndicator } from './BufferingIndicator';
 import {
   Play,
   Pause,
@@ -21,6 +25,7 @@ import {
   ArrowLeft,
   Sparkles,
   PictureInPicture,
+  AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -32,8 +37,12 @@ interface VideoPlayerProps {
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const urlRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const bufferingManagerRef = useRef<BufferingManager | null>(null);
 
   const { settings, isPrivacyActive, isLocked, togglePrivacyMode, lockApp } = useAuth();
+  const networkStatus = useNetworkStatus();
+  const bufferingState = useBufferedSegments(videoRef);
 
   // Exit HTML5 fullscreen and pause video whenever Privacy Mode or Panic Lock is activated
   useEffect(() => {
@@ -72,9 +81,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const [showControls, setShowControls] = useState(true);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [hasRecordedPlay, setHasRecordedPlay] = useState(false);
+  const [networkWarning, setNetworkWarning] = useState(false);
+  const [isBufferingPaused, setIsBufferingPaused] = useState(false);
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedPositionRef = useRef<number>(0);
+  const lastNetworkSpeedRef = useRef<string>(networkStatus.speed);
+
+  // Initialize buffering manager with detected network speed
+  useEffect(() => {
+    if (!bufferingManagerRef.current) {
+      bufferingManagerRef.current = new BufferingManager(networkStatus.speed);
+    } else {
+      bufferingManagerRef.current.updateNetworkSpeed(networkStatus.speed);
+    }
+    lastNetworkSpeedRef.current = networkStatus.speed;
+  }, [networkStatus.speed]);
+
+  // Show network warning on slow connections
+  useEffect(() => {
+    setNetworkWarning(networkStatus.speed === 'slow');
+  }, [networkStatus.speed]);
 
   // Resume position initialization
   useEffect(() => {
@@ -95,6 +122,58 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       }
     }
   };
+
+  // Handle buffering state - pause if buffer can't keep up
+  useEffect(() => {
+    if (!videoRef.current || duration === 0) return;
+
+    const shouldPause = bufferingManagerRef.current?.shouldPauseForBuffering(
+      bufferingState.totalBuffered,
+      currentTime,
+      duration
+    );
+
+    if (shouldPause && isPlaying && !isBufferingPaused) {
+      // Only pause for buffering if video is actually playing
+      videoRef.current.pause();
+      setIsBufferingPaused(true);
+    } else if (!shouldPause && isBufferingPaused && videoRef.current.paused) {
+      // Resume when buffer is ready
+      videoRef.current.play().catch(() => {});
+      setIsBufferingPaused(false);
+    }
+  }, [bufferingState.totalBuffered, currentTime, duration, isPlaying, isBufferingPaused]);
+
+  // Token refresh - rotate URL every 30 seconds for privacy
+  useEffect(() => {
+    if (!isPlaying || currentTime < 5) return; // Start after 5 seconds of playback
+
+    urlRefreshIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await api.refreshStreamUrl(video._id);
+        if (res?.streamUrl && videoRef.current) {
+          // Update video source without interrupting playback
+          const currentPos = videoRef.current.currentTime;
+          const wasPlaying = !videoRef.current.paused;
+
+          videoRef.current.src = res.streamUrl;
+
+          if (wasPlaying) {
+            videoRef.current.currentTime = currentPos;
+            videoRef.current.play().catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.error('Failed to refresh stream URL:', err);
+      }
+    }, 30000); // Refresh every 30 seconds
+
+    return () => {
+      if (urlRefreshIntervalRef.current) {
+        clearInterval(urlRefreshIntervalRef.current);
+      }
+    };
+  }, [isPlaying, video._id, currentTime]);
 
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {
@@ -336,6 +415,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         playsInline
       />
 
+      {/* Network Warning Badge */}
+      {networkWarning && (
+        <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-2 bg-orange-950/80 border border-orange-700 rounded-lg backdrop-blur-md animate-pulse">
+          <AlertCircle className="w-4 h-4 text-orange-400 flex-shrink-0" />
+          <span className="text-xs font-medium text-orange-300">Slow network detected</span>
+        </div>
+      )}
+
+      {/* Buffering Status */}
+      {isBufferingPaused && (
+        <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-12 h-12 border-3 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+            <span className="text-sm font-medium text-amber-300">Buffering...</span>
+          </div>
+        </div>
+      )}
+
       {/* Resume Playback Prompt Banner */}
       {showResumePrompt && (
         <div className="absolute top-6 left-6 right-6 z-30 glass-panel bg-zinc-950/90 p-4 rounded-xl border border-white/10 flex items-center justify-between shadow-2xl animate-fade-in">
@@ -419,20 +516,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
         {/* Bottom Control Bar */}
         <div className="space-y-3 pointer-events-auto">
-          {/* Progress Timeline Scrubber */}
+          {/* Buffering Indicator - YouTube Style Gray Progress */}
           <div className="flex items-center gap-3">
             <span className="font-mono text-xs text-slate-300 w-12 text-right">
               {formatTime(currentTime)}
             </span>
-            <input
-              type="range"
-              min={0}
-              max={duration || 100}
-              step={0.1}
-              value={currentTime}
-              onChange={handleSeek}
-              className="flex-1 h-1.5"
-            />
+            <div className="flex-1 flex flex-col gap-1">
+              {/* Progress Timeline Scrubber with Buffering Indicator */}
+              <BufferingIndicator
+                bufferedRanges={bufferingState.bufferedRanges}
+                currentTime={currentTime}
+                duration={duration || 100}
+                percentBuffered={bufferingState.percentBuffered}
+                isBuffering={bufferingState.isBuffering}
+              />
+              <input
+                type="range"
+                min={0}
+                max={duration || 100}
+                step={0.1}
+                value={currentTime}
+                onChange={handleSeek}
+                className="flex-1 h-1.5 opacity-0 absolute pointer-events-auto"
+                style={{
+                  width: 'calc(100% - 24px)',
+                }}
+              />
+            </div>
             <span className="font-mono text-xs text-slate-400 w-12">
               {formatTime(duration)}
             </span>
