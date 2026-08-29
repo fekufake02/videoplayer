@@ -6,6 +6,8 @@ import helmet from 'helmet';
 import { config } from './config';
 import { connectDB } from './config/db';
 import { ensureAdminUser } from './controllers/authController';
+import { secureStreamHeaders } from './middleware/secureHeaders';
+import { streamValidation } from './middleware/streamValidation';
 import routes from './routes';
 
 const app = express();
@@ -20,6 +22,12 @@ app.use(
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
+
+// Secure streaming headers (Range requests, caching, CSP)
+app.use(secureStreamHeaders);
+
+// Stream validation middleware for Range requests
+app.use('/api/videos/:id/stream-url', streamValidation);
 
 // Ultra-lightweight keep-alive health route for Render pings (2 bytes response)
 app.get(['/health', '/api/health'], (_req: Request, _res: Response) => {
@@ -43,7 +51,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Range'],
   })
 );
 
