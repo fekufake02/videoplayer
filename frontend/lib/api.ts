@@ -183,6 +183,7 @@ class ApiClient {
     originalFilename: string;
     storageKey: string;
     thumbnailKey?: string;
+    blurhash?: string;
     mimeType: string;
     size: number;
     duration?: number;

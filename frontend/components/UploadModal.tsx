@@ -151,21 +151,26 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           xhr.send(item.file);
         });
 
-        // Generate WebP thumbnail locally in browser canvas (<20 KB)
+        // Generate WebP thumbnail locally in browser canvas (<20 KB) and upload to B2
         let thumbnailKey: string | undefined = undefined;
+        let blurhash: string | undefined = undefined;
         try {
           const generated = await generateAndUploadThumbnail(item.file, item.file.name);
-          if (generated?.thumbnailKey) thumbnailKey = generated.thumbnailKey;
+          if (generated?.thumbnailKey) {
+            thumbnailKey = generated.thumbnailKey;
+            blurhash = generated.blurhash;
+          }
         } catch (e) {
           console.warn('Thumbnail generation skipped:', e);
         }
 
-        // Step 3: Complete metadata creation with thumbnailKey
+        // Step 3: Complete metadata creation with thumbnailKey & blurhash
         await api.completeUpload({
           title: item.title.trim() || item.file.name,
           originalFilename: item.file.name,
           storageKey,
           thumbnailKey,
+          blurhash,
           mimeType: item.file.type || 'video/mp4',
           size: item.file.size,
         });

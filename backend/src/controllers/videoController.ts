@@ -21,6 +21,7 @@ const completeUploadSchema = z.object({
   originalFilename: z.string().min(1),
   storageKey: z.string().min(1),
   thumbnailKey: z.string().optional(),
+  blurhash: z.string().optional(),
   mimeType: z.string().min(1),
   size: z.number().positive(),
   duration: z.number().optional(),
@@ -263,7 +264,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    const { title, originalFilename, storageKey, thumbnailKey, mimeType, size, duration, tags, notes } = parsed.data;
+    const { title, originalFilename, storageKey, thumbnailKey, blurhash, mimeType, size, duration, tags, notes } = parsed.data;
 
     // Verify file actually landed in Backblaze B2
     const exists = await b2Service.checkObjectExists(storageKey);
@@ -280,6 +281,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
       originalFilename,
       storageKey,
       thumbnailKey: thumbnailKey || undefined,
+      blurhash: blurhash || undefined,
       mimeType,
       size,
       duration: duration || 0,

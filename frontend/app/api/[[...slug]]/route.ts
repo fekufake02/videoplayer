@@ -624,6 +624,7 @@ export async function POST(
         originalFilename: body.originalFilename || 'video.mp4',
         storageKey: body.storageKey || `videos/${videoId}/original.mp4`,
         thumbnailKey: body.thumbnailKey,
+        blurhash: body.blurhash,
         thumbnailUrl: body.thumbnailKey
           ? `/api/upload-receiver?key=${encodeURIComponent(body.thumbnailKey)}`
           : undefined,
