@@ -6,6 +6,7 @@ import { IVideo } from '../types';
 import { Play, Heart, MoreVertical, Clock, Download, Edit3, Trash2, Tag } from 'lucide-react';
 import { api } from '../lib/api';
 import { generateAndUploadThumbnail } from '../lib/thumbnailGenerator';
+import { ThumbnailLoader } from './ThumbnailLoader';
 
 interface VideoCardProps {
   video: IVideo;
@@ -25,13 +26,41 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(video.thumbnailUrl || null);
 
-  const handleMouseEnter = () => {
+  const handleMouseEnter = async () => {
     setIsHovered(true);
-    if (!streamUrl) {
-      api.getStreamUrl(video._id).then((res) => {
-        if (res?.streamUrl) setStreamUrl(res.streamUrl);
-      }).catch(() => {});
+    
+    // Lazy load thumbnail URL on first hover if not already loaded
+    if (!thumbnailUrl && !video.thumbnailKey) {
+      try {
+        const res = await api.getStreamUrl(video._id);
+        if (res?.streamUrl) {
+          setStreamUrl(res.streamUrl);
+          
+          // Auto-generate WebP thumbnail for existing videos without one
+          // This runs in background and doesn't block UI
+          generateAndUploadThumbnail(res.streamUrl, video.originalFilename)
+            .then((key) => {
+              if (key) {
+                api.attachThumbnail(video._id, key).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      } catch (err) {
+        console.error('Failed to get stream URL:', err);
+      }
+    } else if (video.thumbnailKey && !thumbnailUrl) {
+      // Get presigned thumbnail URL
+      try {
+        const res = await api.getThumbnailUrl(video._id);
+        if (res?.thumbnailUrl) {
+          setThumbnailUrl(res.thumbnailUrl);
+        }
+      } catch (err) {
+        console.error('Failed to get thumbnail URL:', err);
+      }
     }
   };
 
@@ -96,43 +125,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         onMouseLeave={() => setIsHovered(false)}
         className="relative aspect-video bg-zinc-950 overflow-hidden flex items-center justify-center"
       >
-        {/* Static B2 WebP Thumbnail */}
-        {video.thumbnailUrl ? (
-          <img
-            src={video.thumbnailUrl}
-            alt={video.title}
-            loading="lazy"
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          />
-        ) : isHovered && streamUrl ? (
-          <video
-            src={`${streamUrl}#t=0.5`}
-            preload="metadata"
-            muted
-            playsInline
-            onLoadedData={async (e) => {
-              // Auto-generate WebP thumbnail for existing videos without a thumbnailKey
-              if (!video.thumbnailKey) {
-                try {
-                  const key = await generateAndUploadThumbnail(streamUrl, video.originalFilename);
-                  if (key) {
-                    await api.attachThumbnail(video._id, key);
-                  }
-                } catch (err) {}
-              }
-            }}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          />
-        ) : (
-          <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center gap-2 p-4 text-center">
-            <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 group-hover:border-amber-400/50 group-hover:text-amber-400 transition-colors">
-              <Play className="w-4 h-4 fill-current translate-x-0.5" />
-            </div>
-            <span className="text-[11px] text-zinc-500 font-mono truncate max-w-[180px]">
-              {video.originalFilename}
-            </span>
-          </div>
-        )}
+        {/* Optimized Thumbnail Loader with Blurhash LQIP */}
+        <ThumbnailLoader
+          src={thumbnailUrl}
+          blurhash={video.blurhash}
+          fallbackText={video.originalFilename}
+          alt={video.title}
+          className="group-hover:scale-105 transition-transform duration-500"
+          onLoad={() => {
+            // Thumbnail loaded successfully
+          }}
+        />
 
         {/* Hover Dark Overlay & Center Play Button */}
         <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
