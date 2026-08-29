@@ -8,10 +8,10 @@ import { b2Service } from '../services/b2Service';
 import { AuthenticatedRequest } from '../middleware/auth';
 
 const initiateUploadSchema = z.object({
-  title: z.string().min(1, 'Title is required'),
+  title: z.string().optional(),
   filename: z.string().min(1, 'Filename is required'),
   mimeType: z.string().min(1, 'MIME type is required'),
-  size: z.number().positive('File size must be positive'),
+  size: z.number().positive('File size must be positive').optional(),
   tags: z.array(z.string()).optional(),
   notes: z.string().optional(),
 });
@@ -208,26 +208,32 @@ export const initiateUpload = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    const { filename, mimeType } = parsed.data;
+    const { filename, mimeType, title } = parsed.data;
 
-    // Validate supported video MIME types
-    const allowedMimePrefixes = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-matroska'];
-    const isAllowed = allowedMimePrefixes.some((prefix) => mimeType.toLowerCase().startsWith(prefix));
-    if (!isAllowed) {
+    // Validate supported video and image MIME types
+    const isImage = mimeType.toLowerCase().startsWith('image/');
+    const allowedVideoPrefixes = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-matroska'];
+    const isVideo = allowedVideoPrefixes.some((prefix) => mimeType.toLowerCase().startsWith(prefix));
+
+    if (!isImage && !isVideo) {
       res.status(400).json({
         success: false,
-        error: { code: 'UNSUPPORTED_FORMAT', message: 'Only standard web video formats (MP4, WebM, MOV, MKV) are supported.' },
+        error: { code: 'UNSUPPORTED_FORMAT', message: 'Only standard web video formats (MP4, WebM, MOV, MKV) and image formats (WebP, JPEG, PNG) are supported.' },
       });
       return;
     }
 
-    const rawExt = path.extname(filename) || '.mp4';
+    const rawExt = path.extname(filename) || (isImage ? '.webp' : '.mp4');
     const safeExt = rawExt.replace(/[^a-zA-Z0-9.]/g, '');
     const videoId = crypto.randomBytes(8).toString('hex');
     const randomUuid = crypto.randomUUID();
 
-    // Storage Key layout: videos/{videoId}/original/{uuid}.mp4
-    const storageKey = `videos/${videoId}/original/${randomUuid}${safeExt}`;
+    // Storage Key layout:
+    // Videos: videos/{videoId}/original/{uuid}.mp4
+    // Thumbnails: thumbnails/{videoId}/{uuid}.webp
+    const storageKey = isImage
+      ? `thumbnails/${videoId}/${randomUuid}${safeExt}`
+      : `videos/${videoId}/original/${randomUuid}${safeExt}`;
 
     const uploadUrl = await b2Service.getPresignedUploadUrl(storageKey, mimeType);
 
@@ -270,7 +276,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
     }
 
     const video = await Video.create({
-      title,
+      title: title || originalFilename,
       originalFilename,
       storageKey,
       thumbnailKey: thumbnailKey || undefined,
@@ -296,7 +302,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
 
 export const attachThumbnail = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { thumbnailKey } = req.body;
+    const { thumbnailKey, blurhash } = req.body;
     if (!thumbnailKey || typeof thumbnailKey !== 'string') {
       res.status(400).json({
         success: false,
@@ -315,6 +321,9 @@ export const attachThumbnail = async (req: AuthenticatedRequest, res: Response):
     }
 
     video.thumbnailKey = thumbnailKey;
+    if (blurhash && typeof blurhash === 'string') {
+      video.blurhash = blurhash;
+    }
     await video.save();
 
     res.status(200).json({

@@ -130,19 +130,52 @@ class ApiClient {
   /**
    * Initiate upload for direct B2 thumbnail uploads
    */
+  async initiateThumbnailUpload(payload: {
+    filename?: string;
+    mimeType?: string;
+    size?: number;
+    videoId?: string;
+  }) {
+    try {
+      return await this.request<{
+        success: boolean;
+        uploadUrl: string;
+        storageKey: string;
+      }>('/thumbnails/upload/initiate', {
+        method: 'POST',
+        body: JSON.stringify({
+          filename: payload.filename || 'thumbnail.webp',
+          mimeType: payload.mimeType || 'image/webp',
+          size: payload.size || 1024,
+          videoId: payload.videoId,
+        }),
+      });
+    } catch {
+      return await this.request<{
+        success: boolean;
+        uploadUrl: string;
+        storageKey: string;
+      }>('/videos/upload/initiate', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: 'Thumbnail',
+          filename: payload.filename || 'thumbnail.webp',
+          mimeType: payload.mimeType || 'image/webp',
+          size: payload.size || 1024,
+        }),
+      });
+    }
+  }
+
+  /**
+   * Initiate upload for direct B2 thumbnail uploads (backward compatible alias)
+   */
   async initiateUploadDirect(payload: {
     filename: string;
     mimeType: string;
     size: number;
   }) {
-    return this.request<{
-      success: boolean;
-      uploadUrl: string;
-      storageKey: string;
-    }>('/videos/upload/initiate', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    return this.initiateThumbnailUpload(payload);
   }
 
   async completeUpload(payload: {
@@ -162,11 +195,37 @@ class ApiClient {
     });
   }
 
-  async attachThumbnail(id: string, thumbnailKey: string) {
+  async attachThumbnail(id: string, thumbnailKey: string, blurhash?: string) {
     return this.request<{ success: boolean; video: IVideo }>(`/videos/${id}/thumbnail`, {
       method: 'POST',
-      body: JSON.stringify({ thumbnailKey }),
+      body: JSON.stringify({ thumbnailKey, blurhash }),
     });
+  }
+
+  /**
+   * Helper to fetch all videos across all pagination pages (e.g. for batch migrations)
+   */
+  async getAllVideos(): Promise<IVideo[]> {
+    const allVideos: IVideo[] = [];
+    let page = 1;
+    const limit = 100;
+    let hasMore = true;
+
+    while (hasMore) {
+      const res = await this.listVideos({ page, limit });
+      if (res.videos && res.videos.length > 0) {
+        allVideos.push(...res.videos);
+        if (allVideos.length >= res.total || res.videos.length < limit) {
+          hasMore = false;
+        } else {
+          page += 1;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
+
+    return allVideos;
   }
 
   async getVideoDetails(id: string) {

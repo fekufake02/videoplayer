@@ -63,6 +63,11 @@ export async function extractVideoFrame(
   });
 }
 
+export interface ThumbnailGenerationResult {
+  thumbnailKey: string;
+  blurhash?: string;
+}
+
 /**
  * Generate and upload thumbnail for a video
  */
@@ -70,31 +75,39 @@ export async function generateAndUploadThumbnail(
   videoSource: string | File,
   originalFilename: string,
   timestamp: number = 1
-): Promise<string | null> {
+): Promise<ThumbnailGenerationResult | null> {
   try {
     // Extract frame from video
     const canvas = await extractVideoFrame(videoSource, timestamp);
 
-    // Generate blurhash for LQIP
-    const blurhash = await generateBlurhashFromCanvas(canvas);
+    // Generate blurhash for LQIP (instant 0ms placeholder)
+    let blurhash: string | undefined;
+    try {
+      blurhash = await generateBlurhashFromCanvas(canvas);
+    } catch {
+      // Blurhash generation is optional
+    }
 
-    // Compress to WebP
+    // Compress to WebP (<20KB)
     const blob = await canvasToWebP(canvas, 0.7);
 
-    // Create unique thumbnail key
-    const videoId = originalFilename.split('.')[0];
-    const thumbnailKey = `thumbnails/${videoId}/thumbnail.webp`;
+    // Clean sanitized filename
+    const safeBaseName = (originalFilename || 'video')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 32);
 
-    // Get upload URL
-    const uploadRes = await api.initiateUploadDirect({
-      filename: 'thumbnail.webp',
+    // Get presigned upload URL
+    const uploadRes = await api.initiateThumbnailUpload({
+      filename: `${safeBaseName}_thumb.webp`,
       mimeType: 'image/webp',
       size: blob.size,
     });
 
-    if (!uploadRes.uploadUrl) throw new Error('Failed to get upload URL');
+    if (!uploadRes || !uploadRes.uploadUrl) {
+      throw new Error('Failed to get presigned upload URL for thumbnail');
+    }
 
-    // Upload WebP thumbnail
+    // Direct PUT upload to B2 / storage
     const uploadResponse = await fetch(uploadRes.uploadUrl, {
       method: 'PUT',
       headers: {
@@ -104,10 +117,13 @@ export async function generateAndUploadThumbnail(
     });
 
     if (!uploadResponse.ok) {
-      throw new Error(`Upload failed: ${uploadResponse.statusText}`);
+      throw new Error(`Thumbnail upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
     }
 
-    return thumbnailKey;
+    return {
+      thumbnailKey: uploadRes.storageKey,
+      blurhash,
+    };
   } catch (error) {
     console.error('Thumbnail generation failed:', error);
     return null;
@@ -116,41 +132,69 @@ export async function generateAndUploadThumbnail(
 
 /**
  * Batch generate thumbnails for multiple videos
- * Used for migrating existing videos
+ * Used for migrating existing videos (200+ collection)
  */
 export async function batchGenerateThumbnails(
   videos: Array<{
     id: string;
-    streamUrl: string;
+    streamUrl?: string;
     originalFilename: string;
+    title?: string;
   }>,
-  onProgress?: (current: number, total: number) => void
-): Promise<void> {
+  onProgress?: (current: number, total: number, currentTitle?: string, isSuccess?: boolean) => void
+): Promise<{ success: number; failed: number }> {
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let successCount = 0;
+  let failedCount = 0;
 
   for (let i = 0; i < videos.length; i++) {
     const video = videos[i];
-    try {
-      const thumbnailKey = await generateAndUploadThumbnail(
-        video.streamUrl,
-        video.originalFilename
-      );
+    const displayTitle = video.title || video.originalFilename || `Video ${i + 1}`;
 
-      if (thumbnailKey) {
-        // Attach to video
-        await api.attachThumbnail(video.id, thumbnailKey);
+    try {
+      // Fetch fresh stream URL if not already provided
+      let streamUrl = video.streamUrl;
+      if (!streamUrl) {
+        const streamRes = await api.getStreamUrl(video.id);
+        streamUrl = streamRes?.streamUrl;
+      }
+
+      if (!streamUrl) {
+        throw new Error('Could not acquire temporary stream URL');
+      }
+
+      // Generate & upload thumbnail
+      const result = await generateAndUploadThumbnail(streamUrl, video.originalFilename);
+
+      if (result?.thumbnailKey) {
+        // Attach thumbnail key and blurhash to video record
+        await api.attachThumbnail(video.id, result.thumbnailKey, result.blurhash);
+        successCount++;
+        if (onProgress) {
+          onProgress(i + 1, videos.length, displayTitle, true);
+        }
+      } else {
+        failedCount++;
+        if (onProgress) {
+          onProgress(i + 1, videos.length, displayTitle, false);
+        }
       }
     } catch (error) {
-      console.error(`Failed to generate thumbnail for ${video.id}:`, error);
+      console.error(`Failed to generate thumbnail for video ${video.id}:`, error);
+      failedCount++;
+      if (onProgress) {
+        onProgress(i + 1, videos.length, displayTitle, false);
+      }
     }
 
-    // Rate limiting: 500ms between generations to avoid API throttling
+    // Rate limiting delay between generations to ensure smooth client performance
     if (i < videos.length - 1) {
-      await delay(500);
-    }
-
-    if (onProgress) {
-      onProgress(i + 1, videos.length);
+      await delay(250);
     }
   }
+
+  return {
+    success: successCount,
+    failed: failedCount,
+  };
 }

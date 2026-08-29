@@ -1,8 +1,52 @@
 import { Response } from 'express';
 import { z } from 'zod';
+import crypto from 'crypto';
+import path from 'path';
 import { Video } from '../models/Video';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { b2Service } from '../services/b2Service';
+
+const initiateThumbnailSchema = z.object({
+  filename: z.string().optional(),
+  mimeType: z.string().optional(),
+  size: z.number().optional(),
+  videoId: z.string().optional(),
+});
+
+/**
+ * Get presigned URL to upload a thumbnail directly
+ */
+export const initiateThumbnailUpload = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    const parsed = initiateThumbnailSchema.safeParse(req.body);
+    const filename = parsed.success && parsed.data.filename ? parsed.data.filename : 'thumbnail.webp';
+    const mimeType = parsed.success && parsed.data.mimeType ? parsed.data.mimeType : 'image/webp';
+    const videoId = parsed.success && parsed.data.videoId ? parsed.data.videoId : crypto.randomBytes(8).toString('hex');
+    const randomUuid = crypto.randomUUID();
+
+    const rawExt = path.extname(filename) || '.webp';
+    const safeExt = rawExt.replace(/[^a-zA-Z0-9.]/g, '');
+    const storageKey = `thumbnails/${videoId}/${randomUuid}${safeExt}`;
+
+    const uploadUrl = await b2Service.getPresignedUploadUrl(storageKey, mimeType);
+
+    res.status(200).json({
+      success: true,
+      uploadUrl,
+      storageKey,
+      videoId,
+    });
+  } catch (error) {
+    console.error('Initiate thumbnail upload error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to initiate thumbnail upload' },
+    });
+  }
+};
 
 const batchGenerateSchema = z.object({
   videoIds: z.array(z.string()).min(1).max(100),

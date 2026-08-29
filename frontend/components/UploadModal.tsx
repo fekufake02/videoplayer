@@ -151,11 +151,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           xhr.send(item.file);
         });
 
-        // Generate WebP thumbnail locally in browser canvas (25 KB)
+        // Generate WebP thumbnail locally in browser canvas (<20 KB)
         let thumbnailKey: string | undefined = undefined;
         try {
-          const generatedKey = await generateAndUploadThumbnail(item.file, item.file.name);
-          if (generatedKey) thumbnailKey = generatedKey;
+          const generated = await generateAndUploadThumbnail(item.file, item.file.name);
+          if (generated?.thumbnailKey) thumbnailKey = generated.thumbnailKey;
         } catch (e) {
           console.warn('Thumbnail generation skipped:', e);
         }

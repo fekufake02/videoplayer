@@ -9,6 +9,7 @@ interface IVideoItem {
   storageKey: string;
   thumbnailKey?: string;
   thumbnailUrl?: string;
+  blurhash?: string;
   streamUrl?: string;
   mimeType: string;
   size: number;
@@ -552,7 +553,8 @@ export async function POST(
       const body = await req.json();
       const videoId = 'vid-' + crypto.randomBytes(4).toString('hex');
       const filename = body.filename || 'video.mp4';
-      const storageKey = `videos/${videoId}/${filename}`;
+      const isImage = (body.mimeType || '').toLowerCase().startsWith('image/');
+      const storageKey = isImage ? `thumbnails/${videoId}/${filename}` : `videos/${videoId}/${filename}`;
 
       // Upload directly to local API upload endpoint
       const uploadUrl = `/api/upload-receiver?key=${encodeURIComponent(storageKey)}`;
@@ -566,6 +568,37 @@ export async function POST(
     } catch (e: any) {
       return NextResponse.json(
         { success: false, error: { message: 'Failed to initiate upload.' } },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 3.1 Initiate Thumbnail Upload: /api/thumbnails/upload/initiate
+  if (path === 'thumbnails/upload/initiate') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    try {
+      const body = await req.json();
+      const thumbId = 'thumb-' + crypto.randomBytes(4).toString('hex');
+      const filename = body.filename || 'thumbnail.webp';
+      const storageKey = `thumbnails/${thumbId}/${filename}`;
+      const uploadUrl = `/api/upload-receiver?key=${encodeURIComponent(storageKey)}`;
+
+      return NextResponse.json({
+        success: true,
+        uploadUrl,
+        storageKey,
+        videoId: thumbId,
+      });
+    } catch (e: any) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Failed to initiate thumbnail upload.' } },
         { status: 500 }
       );
     }
@@ -673,6 +706,9 @@ export async function POST(
 
     const body = await req.json();
     video.thumbnailKey = body.thumbnailKey;
+    if (body.blurhash) {
+      video.blurhash = body.blurhash;
+    }
     video.thumbnailUrl = `/api/upload-receiver?key=${encodeURIComponent(body.thumbnailKey)}`;
 
     return NextResponse.json({

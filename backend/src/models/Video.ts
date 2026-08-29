@@ -5,6 +5,8 @@ export interface IVideo extends Document {
   originalFilename: string;
   storageKey: string;
   thumbnailKey?: string;
+  thumbnailUrl?: string;
+  blurhash?: string;
   mimeType: string;
   size: number;
   duration?: number;
@@ -24,6 +26,7 @@ const videoSchema = new Schema<IVideo>(
     originalFilename: { type: String, required: true },
     storageKey: { type: String, required: true, unique: true },
     thumbnailKey: { type: String },
+    blurhash: { type: String },
     mimeType: { type: String, required: true },
     size: { type: Number, required: true },
     duration: { type: Number, default: 0 },

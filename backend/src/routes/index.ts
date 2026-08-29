@@ -26,6 +26,7 @@ router.get('/videos/:id', requireAuth, videoController.getVideoDetails);
 router.patch('/videos/:id', requireAuth, videoController.updateVideoMetadata);
 router.post('/videos/:id/thumbnail', requireAuth, videoController.attachThumbnail);
 router.get('/videos/:id/thumbnail-url', requireAuth, thumbnailController.getThumbnailUrl);
+router.post('/thumbnails/upload/initiate', requireAuth, thumbnailController.initiateThumbnailUpload);
 router.post('/thumbnails/batch-generate', requireAuth, thumbnailController.batchGenerateThumbnails);
 router.delete('/videos/:id', requireAuth, videoController.deleteVideo);
 

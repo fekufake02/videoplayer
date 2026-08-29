@@ -41,9 +41,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           // Auto-generate WebP thumbnail for existing videos without one
           // This runs in background and doesn't block UI
           generateAndUploadThumbnail(res.streamUrl, video.originalFilename)
-            .then((key) => {
-              if (key) {
-                api.attachThumbnail(video._id, key).catch(() => {});
+            .then((result) => {
+              if (result?.thumbnailKey) {
+                api.attachThumbnail(video._id, result.thumbnailKey, result.blurhash).catch(() => {});
+                // Fetch presigned thumbnail URL for immediate display
+                api.getThumbnailUrl(video._id).then((t) => {
+                  if (t?.thumbnailUrl) setThumbnailUrl(t.thumbnailUrl);
+                }).catch(() => {});
               }
             })
             .catch(() => {});

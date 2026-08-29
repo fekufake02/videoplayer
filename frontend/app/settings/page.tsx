@@ -16,7 +16,10 @@ import {
   EyeOff,
   Lock,
   Sparkles,
+  Loader2,
+  PlaySquare,
 } from 'lucide-react';
+import { batchGenerateThumbnails } from '../../lib/thumbnailGenerator';
 
 export default function SettingsPage() {
   const { settings, refreshSettings, isAuthenticated, isLoading } = useAuth();
@@ -39,6 +42,16 @@ export default function SettingsPage() {
 
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState<boolean>(false);
   const [isClearingHistory, setIsClearingHistory] = useState<boolean>(false);
+
+  // Batch Thumbnail Optimization State
+  const [isOptimizingThumbnails, setIsOptimizingThumbnails] = useState<boolean>(false);
+  const [optimizationProgress, setOptimizationProgress] = useState<{
+    current: number;
+    total: number;
+    currentTitle: string;
+    successCount: number;
+    failedCount: number;
+  } | null>(null);
 
   useEffect(() => {
     if (settings) {
@@ -306,34 +319,127 @@ export default function SettingsPage() {
             </h2>
 
             <div className="space-y-4 text-xs">
-              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h4 className="font-semibold text-white mb-1">Batch Generate WebP Thumbnails</h4>
-                  <p className="text-slate-400 max-w-lg">
-                    Automatically extracts compressed WebP frames & Blurhash placeholders for existing videos (200+ collection) with minimum bandwidth overhead. Eliminates high-bandwidth hover fetching.
-                  </p>
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-semibold text-white mb-1">Batch Generate WebP Thumbnails</h4>
+                    <p className="text-slate-400 max-w-lg">
+                      Scans your full video collection (200+ videos stored on B2), extracts clean 480×270 WebP frames & Blurhash placeholders at 1s timestamp, and stores them with zero server transcoding.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isOptimizingThumbnails}
+                    onClick={async () => {
+                      try {
+                        setIsOptimizingThumbnails(true);
+                        setSuccessMsg('Scanning video library...');
+                        setErrorMsg('');
+                        
+                        // 1. Fetch entire library across all pagination pages
+                        const allVideos = await api.getAllVideos();
+                        
+                        // Filter videos that need thumbnails (or all videos if none found)
+                        const missingThumbnails = allVideos.filter((v) => !v.thumbnailKey && !v.thumbnailUrl);
+                        const targetVideos = missingThumbnails.length > 0 ? missingThumbnails : allVideos;
+
+                        if (targetVideos.length === 0) {
+                          setSuccessMsg('No videos found in library.');
+                          setIsOptimizingThumbnails(false);
+                          return;
+                        }
+
+                        setOptimizationProgress({
+                          current: 0,
+                          total: targetVideos.length,
+                          currentTitle: targetVideos[0]?.title || 'Starting...',
+                          successCount: 0,
+                          failedCount: 0,
+                        });
+
+                        const formattedList = targetVideos.map((v) => ({
+                          id: v._id,
+                          originalFilename: v.originalFilename || `${v.title}.mp4`,
+                          title: v.title,
+                        }));
+
+                        // 2. Run client-side batch extraction and B2 upload
+                        const result = await batchGenerateThumbnails(
+                          formattedList,
+                          (current, total, currentTitle, isSuccess) => {
+                            setOptimizationProgress((prev) => ({
+                              current,
+                              total,
+                              currentTitle: currentTitle || `Video ${current}`,
+                              successCount: (prev?.successCount || 0) + (isSuccess ? 1 : 0),
+                              failedCount: (prev?.failedCount || 0) + (isSuccess ? 0 : 1),
+                            }));
+                          }
+                        );
+
+                        setSuccessMsg(`Completed thumbnail generation: ${result.success} succeeded, ${result.failed} failed.`);
+                      } catch (e: any) {
+                        console.error('Batch thumbnail error:', e);
+                        setErrorMsg(e.message || 'Failed to complete batch thumbnail generation.');
+                      } finally {
+                        setIsOptimizingThumbnails(false);
+                      }
+                    }}
+                    className={`px-4 py-2 text-black font-semibold rounded-xl text-xs whitespace-nowrap transition-all shadow-md flex-shrink-0 flex items-center gap-2 ${
+                      isOptimizingThumbnails
+                        ? 'bg-amber-600/50 cursor-not-allowed text-amber-200'
+                        : 'bg-amber-500 hover:bg-amber-400'
+                    }`}
+                  >
+                    {isOptimizingThumbnails ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Generating ({optimizationProgress?.current || 0}/{optimizationProgress?.total || 0})
+                      </>
+                    ) : (
+                      <>
+                        <PlaySquare className="w-3.5 h-3.5" />
+                        Optimize 200+ Thumbnails
+                      </>
+                    )}
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      setSuccessMsg('Scanning video library for missing thumbnails...');
-                      const listRes = await api.listVideos({ limit: 100 });
-                      if (listRes.videos?.length) {
-                        const ids = listRes.videos.map((v: { _id: string }) => v._id);
-                        await api.batchGenerateThumbnails(ids);
-                        setSuccessMsg(`Queued thumbnail optimization for ${ids.length} videos!`);
-                        setTimeout(() => setSuccessMsg(''), 4000);
-                      }
-                    } catch (e: any) {
-                      setErrorMsg(e.message || 'Failed to queue batch thumbnail generation');
-                    }
-                  }}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-semibold rounded-xl text-xs whitespace-nowrap transition-all shadow-md flex-shrink-0"
-                >
-                  Optimize 200+ Thumbnails
-                </button>
+                {/* Live Progress Bar when Running */}
+                {optimizationProgress && (
+                  <div className="p-3 bg-zinc-950/80 rounded-lg border border-slate-800 space-y-2 mt-2">
+                    <div className="flex items-center justify-between text-[11px] text-slate-300">
+                      <span className="truncate max-w-[280px] sm:max-w-md font-mono text-amber-400">
+                        {isOptimizingThumbnails ? 'Processing: ' : 'Finished: '} {optimizationProgress.currentTitle}
+                      </span>
+                      <span className="font-semibold text-slate-200">
+                        {optimizationProgress.current} / {optimizationProgress.total} (
+                        {Math.round((optimizationProgress.current / Math.max(1, optimizationProgress.total)) * 100)}%)
+                      </span>
+                    </div>
+
+                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-500 to-amber-300 rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, (optimizationProgress.current / Math.max(1, optimizationProgress.total)) * 100)}%`,
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                      <span className="text-emerald-400">
+                        ✓ {optimizationProgress.successCount} generated
+                      </span>
+                      {optimizationProgress.failedCount > 0 && (
+                        <span className="text-rose-400">
+                          ✕ {optimizationProgress.failedCount} skipped
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>
