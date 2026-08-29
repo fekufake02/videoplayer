@@ -5,6 +5,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL
   : 'http://localhost:4000/api';
 
 class ApiClient {
+  private streamUrlCache: Map<string, { url: string; expiry: number }> = new Map();
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -125,6 +127,24 @@ class ApiClient {
     });
   }
 
+  /**
+   * Initiate upload for direct B2 thumbnail uploads
+   */
+  async initiateUploadDirect(payload: {
+    filename: string;
+    mimeType: string;
+    size: number;
+  }) {
+    return this.request<{
+      success: boolean;
+      uploadUrl: string;
+      storageKey: string;
+    }>('/videos/upload/initiate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async completeUpload(payload: {
     title: string;
     originalFilename: string;
@@ -171,10 +191,42 @@ class ApiClient {
     });
   }
 
-  async getStreamUrl(id: string) {
-    return this.request<{ success: boolean; streamUrl: string }>(`/videos/${id}/stream-url`, {
-      method: 'GET',
-    });
+  /**
+   * Get stream URL with caching and rotation support
+   * Tokens are short-lived (5 min) and need frequent refresh
+   */
+  async getStreamUrl(id: string, forceRefresh: boolean = false) {
+    // Check cache
+    if (!forceRefresh && this.streamUrlCache.has(id)) {
+      const cached = this.streamUrlCache.get(id)!;
+      if (cached.expiry > Date.now()) {
+        return { success: true, streamUrl: cached.url };
+      }
+      this.streamUrlCache.delete(id);
+    }
+
+    const res = await this.request<{ success: boolean; streamUrl: string }>(
+      `/videos/${id}/stream-url`,
+      { method: 'GET' }
+    );
+
+    if (res.success && res.streamUrl) {
+      // Cache for 4 minutes (token expires in 5 minutes)
+      this.streamUrlCache.set(id, {
+        url: res.streamUrl,
+        expiry: Date.now() + 4 * 60 * 1000,
+      });
+    }
+
+    return res;
+  }
+
+  /**
+   * Refresh stream URL for token rotation
+   * Should be called every 30 seconds during playback
+   */
+  async refreshStreamUrl(id: string) {
+    return this.getStreamUrl(id, true);
   }
 
   async getDownloadUrl(id: string) {
@@ -220,6 +272,30 @@ class ApiClient {
     return this.request<{ success: boolean; message: string }>('/settings/clear-history', {
       method: 'POST',
     });
+  }
+
+  /**
+   * Batch generate thumbnails for existing videos
+   */
+  async batchGenerateThumbnails(videoIds: string[]) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      results: any;
+    }>('/thumbnails/batch-generate', {
+      method: 'POST',
+      body: JSON.stringify({ videoIds }),
+    });
+  }
+
+  /**
+   * Get thumbnail URL (cached separately from stream URLs)
+   */
+  async getThumbnailUrl(id: string) {
+    return this.request<{ success: boolean; thumbnailUrl: string }>(
+      `/videos/${id}/thumbnail-url`,
+      { method: 'GET' }
+    );
   }
 }
 

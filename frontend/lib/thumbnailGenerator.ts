@@ -1,121 +1,150 @@
+'use client';
+
 import { api } from './api';
+import { canvasToWebP, generateBlurhashFromCanvas } from './thumbnailOptimizer';
 
 /**
- * Generates a 480x270 WebP image Blob from a video File or video stream URL
+ * Extract frame from video at specific timestamp
  */
-export async function generateCanvasWebpThumbnail(
-  source: File | string,
-  seekTime: number = 1.0
-): Promise<Blob | null> {
-  return new Promise((resolve) => {
+export async function extractVideoFrame(
+  videoUrl: string,
+  timestamp: number = 0.5
+): Promise<HTMLCanvasElement> {
+  return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
+    video.preload = 'metadata';
     video.muted = true;
     video.playsInline = true;
-    video.preload = 'auto';
 
-    let objectUrl: string | null = null;
-    if (source instanceof File) {
-      objectUrl = URL.createObjectURL(source);
-      video.src = objectUrl;
-    } else {
-      video.src = source;
-    }
-
-    const cleanup = () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      video.removeAttribute('src');
-      video.load();
+    const handleLoadedMetadata = () => {
+      video.currentTime = Math.min(timestamp, video.duration * 0.9);
     };
 
-    const timeoutId = setTimeout(() => {
-      cleanup();
-      resolve(null);
-    }, 10000); // 10s safety timeout
+    const handleSeeked = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
-    video.addEventListener('loadeddata', () => {
-      video.currentTime = Math.min(seekTime, (video.duration || 2) / 2);
-    });
-
-    video.addEventListener('seeked', () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const width = 480;
-        const height = 270;
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          clearTimeout(timeoutId);
-          cleanup();
-          resolve(null);
-          return;
-        }
-
-        ctx.drawImage(video, 0, 0, width, height);
-
-        canvas.toBlob(
-          (blob) => {
-            clearTimeout(timeoutId);
-            cleanup();
-            resolve(blob);
-          },
-          'image/webp',
-          0.85
-        );
-      } catch (err) {
-        console.warn('Canvas thumbnail capture error:', err);
-        clearTimeout(timeoutId);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
         cleanup();
-        resolve(null);
+        reject(new Error('Canvas context failed'));
+        return;
       }
-    });
 
-    video.addEventListener('error', () => {
-      clearTimeout(timeoutId);
+      ctx.drawImage(video, 0, 0);
       cleanup();
-      resolve(null);
-    });
+      resolve(canvas);
+    };
+
+    const handleError = () => {
+      cleanup();
+      reject(new Error('Video loading failed'));
+    };
+
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('error', handleError);
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('error', handleError);
+
+    video.src = videoUrl;
   });
 }
 
 /**
- * Generates and uploads a WebP thumbnail for a video file or existing video ID to Backblaze B2
+ * Generate and upload thumbnail for a video
  */
 export async function generateAndUploadThumbnail(
-  source: File | string,
-  baseFilename: string
+  streamUrl: string,
+  originalFilename: string,
+  timestamp: number = 1
 ): Promise<string | null> {
   try {
-    const blob = await generateCanvasWebpThumbnail(source);
-    if (!blob) return null;
+    // Extract frame from video
+    const canvas = await extractVideoFrame(streamUrl, timestamp);
 
-    const thumbFilename = `${baseFilename.replace(/\.[^/.]+$/, '')}_thumb.webp`;
-    const initRes = await api.initiateUpload({
-      title: thumbFilename,
-      filename: thumbFilename,
+    // Generate blurhash for LQIP
+    const blurhash = await generateBlurhashFromCanvas(canvas);
+
+    // Compress to WebP
+    const blob = await canvasToWebP(canvas, 0.7);
+
+    // Create unique thumbnail key
+    const videoId = originalFilename.split('.')[0];
+    const thumbnailKey = `thumbnails/${videoId}/thumbnail.webp`;
+
+    // Get upload URL
+    const uploadRes = await api.initiateUploadDirect({
+      filename: 'thumbnail.webp',
       mimeType: 'image/webp',
       size: blob.size,
     });
 
-    const { uploadUrl, storageKey } = initRes;
+    if (!uploadRes.uploadUrl) throw new Error('Failed to get upload URL');
 
-    await new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('PUT', uploadUrl, true);
-      xhr.setRequestHeader('Content-Type', 'image/webp');
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve();
-        else reject(new Error(`Thumbnail upload failed (${xhr.status})`));
-      };
-      xhr.onerror = () => reject(new Error('Network error uploading thumbnail'));
-      xhr.send(blob);
+    // Upload WebP thumbnail
+    const uploadResponse = await fetch(uploadRes.uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'image/webp',
+      },
+      body: blob,
     });
 
-    return storageKey;
-  } catch (err) {
-    console.warn('Failed to generate & upload WebP thumbnail:', err);
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.statusText}`);
+    }
+
+    return thumbnailKey;
+  } catch (error) {
+    console.error('Thumbnail generation failed:', error);
     return null;
+  }
+}
+
+/**
+ * Batch generate thumbnails for multiple videos
+ * Used for migrating existing videos
+ */
+export async function batchGenerateThumbnails(
+  videos: Array<{
+    id: string;
+    streamUrl: string;
+    originalFilename: string;
+  }>,
+  onProgress?: (current: number, total: number) => void
+): Promise<void> {
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  for (let i = 0; i < videos.length; i++) {
+    const video = videos[i];
+    try {
+      const thumbnailKey = await generateAndUploadThumbnail(
+        video.streamUrl,
+        video.originalFilename
+      );
+
+      if (thumbnailKey) {
+        // Attach to video
+        await api.attachThumbnail(video.id, thumbnailKey);
+      }
+    } catch (error) {
+      console.error(`Failed to generate thumbnail for ${video.id}:`, error);
+    }
+
+    // Rate limiting: 500ms between generations to avoid API throttling
+    if (i < videos.length - 1) {
+      await delay(500);
+    }
+
+    if (onProgress) {
+      onProgress(i + 1, videos.length);
+    }
   }
 }
