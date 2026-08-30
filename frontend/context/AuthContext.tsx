@@ -35,24 +35,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
 
-  const checkAuth = useCallback(async () => {
+  const checkAuth = useCallback(async (isInitialColdMount = false) => {
     try {
       const data = await api.getMe();
       if (data.authenticated && data.user) {
         setIsAuthenticated(true);
         setUser(data.user);
         if (data.settings) setSettings(data.settings);
-        // By default on reload it should always be locked (unless on /login)
-        if (pathname !== '/login') {
-          setIsLocked(true);
-          setIsPrivacyActive(true);
+        // Only on initial cold load / mount should it be locked (unless on /login)
+        if (isInitialColdMount) {
+          if (window.location.pathname !== '/login') {
+            setIsLocked(true);
+            setIsPrivacyActive(true);
+          }
         }
       } else {
         setIsAuthenticated(false);
         setUser(null);
         setIsLocked(false);
         setIsPrivacyActive(false);
-        if (pathname !== '/login') {
+        if (window.location.pathname !== '/login') {
           router.push('/login');
         }
       }
@@ -61,16 +63,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
       setIsLocked(false);
       setIsPrivacyActive(false);
-      if (pathname !== '/login') {
+      if (window.location.pathname !== '/login') {
         router.push('/login');
       }
     } finally {
       setIsLoading(false);
     }
-  }, [pathname, router]);
+  }, [router]);
 
   useEffect(() => {
-    checkAuth();
+    // Only run on initial cold mount of the app
+    checkAuth(true);
   }, [checkAuth]);
 
   // Listen for 401 unauthorized events
