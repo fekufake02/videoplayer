@@ -147,9 +147,43 @@ export async function generateAndUploadThumbnail(
 }
 
 /**
- * Batch generate thumbnails for multiple videos
- * Used for migrating/reprocessing existing videos (200+ collection)
+ * Reprocess and update thumbnail for a single video at a specific timestamp
  */
+export async function reprocessSingleVideoThumbnail(
+  videoId: string,
+  originalFilename: string,
+  timestamp: number = 15,
+  customStreamUrl?: string
+): Promise<{ success: boolean; thumbnailKey?: string; blurhash?: string; error?: string }> {
+  try {
+    let streamUrl = customStreamUrl;
+    if (!streamUrl) {
+      const streamRes = await api.getStreamUrl(videoId, true);
+      if (!streamRes.success || !streamRes.streamUrl) {
+        throw new Error('Could not acquire temporary stream URL');
+      }
+      streamUrl = streamRes.streamUrl;
+    }
+
+    const result = await generateAndUploadThumbnail(streamUrl, originalFilename, timestamp);
+    if (!result?.thumbnailKey) {
+      throw new Error('Thumbnail upload failed to return a valid storage key');
+    }
+
+    await api.attachThumbnail(videoId, result.thumbnailKey, result.blurhash);
+    return {
+      success: true,
+      thumbnailKey: result.thumbnailKey,
+      blurhash: result.blurhash,
+    };
+  } catch (err: any) {
+    console.error('Failed to reprocess single thumbnail:', err);
+    return {
+      success: false,
+      error: err.message || 'Failed to generate thumbnail',
+    };
+  }
+}
 export async function batchGenerateThumbnails(
   videos: Array<{
     id: string;

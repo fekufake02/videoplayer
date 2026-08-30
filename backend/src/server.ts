@@ -107,7 +107,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 if (process.env.NODE_ENV !== 'test') {
   const port = config.port || 10000;
   app.listen(port, '0.0.0.0', () => {
-    console.log(`Private Video Library Backend running on port ${port}`);
+    console.log(`My Vault Backend running on port ${port}`);
     connectDB().then(async () => {
       await ensureAdminUser();
     }).catch((err) => {

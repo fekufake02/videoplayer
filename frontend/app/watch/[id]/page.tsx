@@ -21,7 +21,11 @@ import {
   Tag,
   FileText,
   AlertCircle,
+  RotateCcw,
+  Check,
+  Sparkles,
 } from 'lucide-react';
+import { reprocessSingleVideoThumbnail } from '../../../lib/thumbnailGenerator';
 
 export default function WatchPage() {
   const params = useParams();
@@ -38,6 +42,11 @@ export default function WatchPage() {
   const [editingVideo, setEditingVideo] = useState<IVideo | null>(null);
   const [deletingVideo, setDeletingVideo] = useState<IVideo | null>(null);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
+
+  // Thumbnail Sync State
+  const [thumbnailTimestamp, setThumbnailTimestamp] = useState<number>(15);
+  const [isSyncingThumbnail, setIsSyncingThumbnail] = useState<boolean>(false);
+  const [thumbnailSuccessMsg, setThumbnailSuccessMsg] = useState<string>('');
 
   const fetchVideoAndStream = async () => {
     if (!id) return;
@@ -75,6 +84,43 @@ export default function WatchPage() {
       setVideo((prev) => (prev ? { ...prev, favorite: res.favorite } : null));
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
+    }
+  };
+
+  const handleSyncThumbnail = async (timestampSec: number = thumbnailTimestamp) => {
+    if (!video || isSyncingThumbnail) return;
+    setIsSyncingThumbnail(true);
+    setThumbnailSuccessMsg('');
+    setError('');
+
+    try {
+      const res = await reprocessSingleVideoThumbnail(
+        video._id,
+        video.originalFilename,
+        timestampSec,
+        streamUrl
+      );
+
+      if (res.success && res.thumbnailKey) {
+        setVideo((prev) =>
+          prev
+            ? {
+                ...prev,
+                thumbnailKey: res.thumbnailKey,
+                blurhash: res.blurhash,
+              }
+            : null
+        );
+        setThumbnailSuccessMsg(`Thumbnail updated at ${timestampSec}s!`);
+        setTimeout(() => setThumbnailSuccessMsg(''), 4000);
+      } else {
+        setError(res.error || 'Failed to capture frame from video');
+      }
+    } catch (err: any) {
+      console.error('Sync thumbnail error:', err);
+      setError(err.message || 'Error updating video thumbnail');
+    } finally {
+      setIsSyncingThumbnail(false);
     }
   };
 
@@ -176,7 +222,14 @@ export default function WatchPage() {
                 </div>
 
                 {/* Toolbar Buttons */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {thumbnailSuccessMsg && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 text-xs font-medium rounded-xl animate-fade-in">
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{thumbnailSuccessMsg}</span>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleToggleFavorite}
                     className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-medium transition-all ${
@@ -197,6 +250,44 @@ export default function WatchPage() {
                     <Download className="w-4 h-4 text-indigo-400" />
                     <span>{isDownloading ? 'Preparing...' : 'Download'}</span>
                   </button>
+
+                  {/* Sync Thumbnail with Timestamp Dropdown */}
+                  <div
+                    className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5"
+                    title="Regenerate thumbnail image at chosen timestamp"
+                  >
+                    <button
+                      type="button"
+                      disabled={isSyncingThumbnail}
+                      onClick={() => handleSyncThumbnail(thumbnailTimestamp)}
+                      className={`p-2 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-amber-400 transition-all flex items-center gap-1 ${
+                        isSyncingThumbnail ? 'text-amber-400 cursor-not-allowed' : ''
+                      }`}
+                      title={`Sync / regenerate thumbnail at ${thumbnailTimestamp}s`}
+                    >
+                      <RotateCcw className={`w-4 h-4 ${isSyncingThumbnail ? 'animate-spin text-amber-400' : 'text-slate-300'}`} />
+                    </button>
+                    <select
+                      value={thumbnailTimestamp}
+                      disabled={isSyncingThumbnail}
+                      onChange={(e) => {
+                        const newTime = Number(e.target.value);
+                        setThumbnailTimestamp(newTime);
+                        handleSyncThumbnail(newTime);
+                      }}
+                      className="bg-transparent text-amber-400 text-xs font-semibold py-1.5 pr-2.5 pl-1 border-l border-slate-800/80 outline-none cursor-pointer hover:text-amber-300"
+                      title="Select video timestamp for thumbnail"
+                    >
+                      <option value="5" className="bg-slate-900 text-slate-200">5s</option>
+                      <option value="10" className="bg-slate-900 text-slate-200">10s</option>
+                      <option value="15" className="bg-slate-900 text-amber-400 font-bold">15s (Default)</option>
+                      <option value="20" className="bg-slate-900 text-slate-200">20s</option>
+                      <option value="30" className="bg-slate-900 text-slate-200">30s</option>
+                      <option value="45" className="bg-slate-900 text-slate-200">45s</option>
+                      <option value="60" className="bg-slate-900 text-slate-200">60s</option>
+                      <option value="90" className="bg-slate-900 text-slate-200">90s</option>
+                    </select>
+                  </div>
 
                   <button
                     onClick={() => setEditingVideo(video)}

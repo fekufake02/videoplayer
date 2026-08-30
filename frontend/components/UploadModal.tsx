@@ -151,11 +151,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           xhr.send(item.file);
         });
 
-        // Generate WebP thumbnail locally in browser canvas (<20 KB) and upload to B2
+        // Generate WebP thumbnail locally in browser canvas (<20 KB) and upload to B2 at default 15s
         let thumbnailKey: string | undefined = undefined;
         let blurhash: string | undefined = undefined;
         try {
-          const generated = await generateAndUploadThumbnail(item.file, item.file.name);
+          const generated = await generateAndUploadThumbnail(item.file, item.file.name, 15);
           if (generated?.thumbnailKey) {
             thumbnailKey = generated.thumbnailKey;
             blurhash = generated.blurhash;

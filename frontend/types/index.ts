@@ -28,7 +28,10 @@ export interface ISettings {
   autoResume: boolean;
   autoplay: boolean;
   autoLockDuration: number; // minutes (0 = Never)
-  privacyTabHidden: boolean;
+  privacyTabHidden: boolean; // Lock on tab switch
+  lockOnWindowBlur?: boolean; // Lock when browser loses focus
+  pauseOnTabSwitch?: boolean; // Pause video when switching tabs
+  keyboardShortcuts?: boolean; // Enable panic & player hotkeys
   saveWatchHistory: boolean;
   theme: 'dark' | 'light' | 'system';
   layout: 'comfortable' | 'compact';

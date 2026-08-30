@@ -148,23 +148,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       lockApp();
     };
 
+    // Lock on Tab Switch ONLY if privacyTabHidden is enabled in settings
     const handleVisibilityChange = () => {
-      if (document.hidden) {
+      if (document.hidden && settings?.privacyTabHidden) {
         handleLock();
       }
     };
 
+    // Lock on Window Blur ONLY if lockOnWindowBlur is enabled in settings
     const handleBlur = () => {
-      handleLock();
+      if (settings?.lockOnWindowBlur) {
+        handleLock();
+      }
     };
 
     const handleBeforeUnload = () => {
       sessionStorage.removeItem('metime_unlocked');
     };
 
-    // Auto-lock on page reload if session unlock token is missing
+    // Auto-lock on page reload if privacyTabHidden is active and session unlock token is missing
     const isUnlocked = sessionStorage.getItem('metime_unlocked') === 'true';
-    if (!isUnlocked && pathname !== '/login') {
+    if (!isUnlocked && pathname !== '/login' && settings?.privacyTabHidden) {
       lockApp();
     }
 
@@ -177,7 +181,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isAuthenticated, lockApp, pathname]);
+  }, [isAuthenticated, lockApp, pathname, settings?.privacyTabHidden, settings?.lockOnWindowBlur]);
 
   // Inactivity auto-lock timer
   useEffect(() => {
@@ -208,6 +212,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // Global Keyboard Shortcuts for Privacy ('P') and Lock ('Ctrl+Shift+L' / 'L')
   useEffect(() => {
+    if (settings?.keyboardShortcuts === false) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore shortcut when typing in input, textarea, or contentEditable
       const target = e.target as HTMLElement;
@@ -236,7 +242,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lockApp, togglePrivacyMode]);
+  }, [lockApp, togglePrivacyMode, settings?.keyboardShortcuts]);
 
   return (
     <AuthContext.Provider

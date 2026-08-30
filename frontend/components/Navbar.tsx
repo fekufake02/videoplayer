@@ -22,13 +22,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 glass-nav px-4 lg:px-8 py-3.5 flex items-center justify-between gap-4">
-      {/* Metime Brand Logo */}
+      {/* My Vault Brand Logo */}
       <Link href="/" className="flex items-center gap-2.5 group">
-        <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-105 transition-all text-lg tracking-tighter">
-          M
+        <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-105 transition-all text-base tracking-tighter">
+          V
         </div>
         <span className="font-extrabold text-xl text-white tracking-tight hidden sm:inline">
-          Metime
+          My Vault
         </span>
       </Link>
 

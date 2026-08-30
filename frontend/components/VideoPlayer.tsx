@@ -4,9 +4,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { IVideo } from '../types';
 import { api } from '../lib/api';
-import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useBufferedSegments } from '../hooks/useBufferedSegments';
-import { BufferingManager, estimateBitrate } from '../lib/bufferingManager';
 import { BufferingIndicator } from './BufferingIndicator';
 import {
   Play,
@@ -25,7 +23,6 @@ import {
   ArrowLeft,
   Sparkles,
   PictureInPicture,
-  AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -37,11 +34,8 @@ interface VideoPlayerProps {
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const urlRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const bufferingManagerRef = useRef<BufferingManager | null>(null);
 
   const { settings, isPrivacyActive, isLocked, togglePrivacyMode, lockApp } = useAuth();
-  const networkStatus = useNetworkStatus();
   const bufferingState = useBufferedSegments(videoRef);
 
   // Exit HTML5 fullscreen and pause video whenever Privacy Mode or Panic Lock is activated
@@ -72,6 +66,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   };
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(video.duration || 0);
   const [volume, setVolume] = useState(settings?.defaultVolume ?? 1);
@@ -81,27 +76,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const [showControls, setShowControls] = useState(true);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [hasRecordedPlay, setHasRecordedPlay] = useState(false);
-  const [networkWarning, setNetworkWarning] = useState(false);
-  const [isBufferingPaused, setIsBufferingPaused] = useState(false);
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedPositionRef = useRef<number>(0);
-  const lastNetworkSpeedRef = useRef<string>(networkStatus.speed);
-
-  // Initialize buffering manager with detected network speed
-  useEffect(() => {
-    if (!bufferingManagerRef.current) {
-      bufferingManagerRef.current = new BufferingManager(networkStatus.speed);
-    } else {
-      bufferingManagerRef.current.updateNetworkSpeed(networkStatus.speed);
-    }
-    lastNetworkSpeedRef.current = networkStatus.speed;
-  }, [networkStatus.speed]);
-
-  // Show network warning on slow connections
-  useEffect(() => {
-    setNetworkWarning(networkStatus.speed === 'slow');
-  }, [networkStatus.speed]);
 
   // Resume position initialization
   useEffect(() => {
@@ -123,57 +100,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     }
   };
 
-  // Handle buffering state - pause if buffer can't keep up
+  // Pause playback on tab switch if enabled in settings
   useEffect(() => {
-    if (!videoRef.current || duration === 0) return;
-
-    const shouldPause = bufferingManagerRef.current?.shouldPauseForBuffering(
-      bufferingState.totalBuffered,
-      currentTime,
-      duration
-    );
-
-    if (shouldPause && isPlaying && !isBufferingPaused) {
-      // Only pause for buffering if video is actually playing
-      videoRef.current.pause();
-      setIsBufferingPaused(true);
-    } else if (!shouldPause && isBufferingPaused && videoRef.current.paused) {
-      // Resume when buffer is ready
-      videoRef.current.play().catch(() => {});
-      setIsBufferingPaused(false);
-    }
-  }, [bufferingState.totalBuffered, currentTime, duration, isPlaying, isBufferingPaused]);
-
-  // Token refresh - rotate URL every 30 seconds for privacy
-  useEffect(() => {
-    if (!isPlaying || currentTime < 5) return; // Start after 5 seconds of playback
-
-    urlRefreshIntervalRef.current = setInterval(async () => {
-      try {
-        const res = await api.refreshStreamUrl(video._id);
-        if (res?.streamUrl && videoRef.current) {
-          // Update video source without interrupting playback
-          const currentPos = videoRef.current.currentTime;
-          const wasPlaying = !videoRef.current.paused;
-
-          videoRef.current.src = res.streamUrl;
-
-          if (wasPlaying) {
-            videoRef.current.currentTime = currentPos;
-            videoRef.current.play().catch(() => {});
-          }
+    const handleVisibility = () => {
+      if (document.hidden && settings?.pauseOnTabSwitch !== false) {
+        if (videoRef.current && !videoRef.current.paused) {
+          videoRef.current.pause();
+          setIsPlaying(false);
         }
-      } catch (err) {
-        console.error('Failed to refresh stream URL:', err);
-      }
-    }, 30000); // Refresh every 30 seconds
-
-    return () => {
-      if (urlRefreshIntervalRef.current) {
-        clearInterval(urlRefreshIntervalRef.current);
       }
     };
-  }, [isPlaying, video._id, currentTime]);
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [settings?.pauseOnTabSwitch]);
 
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {
@@ -406,35 +346,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         src={streamUrl}
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
-        onPlay={() => setIsPlaying(true)}
+        onWaiting={() => setIsWaiting(true)}
+        onSeeking={() => setIsWaiting(true)}
+        onLoadStart={() => setIsWaiting(true)}
+        onLoadedData={() => setIsWaiting(false)}
+        onCanPlay={() => setIsWaiting(false)}
+        onCanPlayThrough={() => setIsWaiting(false)}
+        onPlaying={() => {
+          setIsWaiting(false);
+          setIsPlaying(true);
+        }}
+        onSeeked={() => setIsWaiting(false)}
         onPause={() => {
           setIsPlaying(false);
+          setIsWaiting(false);
           if (videoRef.current) saveProgress(videoRef.current.currentTime);
         }}
         onEnded={() => {
           setIsPlaying(false);
+          setIsWaiting(false);
           if (videoRef.current) saveProgress(videoRef.current.duration);
         }}
+        onError={() => setIsWaiting(false)}
         onClick={togglePlay}
         className="w-full h-full object-contain cursor-pointer"
         playsInline
       />
 
-      {/* Network Warning Badge */}
-      {networkWarning && (
-        <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-2 bg-orange-950/80 border border-orange-700 rounded-lg backdrop-blur-md animate-pulse">
-          <AlertCircle className="w-4 h-4 text-orange-400 flex-shrink-0" />
-          <span className="text-xs font-medium text-orange-300">Slow network detected</span>
-        </div>
-      )}
-
-      {/* Buffering Status */}
-      {isBufferingPaused && (
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 border-3 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
-            <span className="text-sm font-medium text-amber-300">Buffering...</span>
-          </div>
+      {/* Center YouTube-Style Loading Spinner (No text, pure spinner when waiting for media packets) */}
+      {isWaiting && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 border-4 border-white/20 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
         </div>
       )}
 
@@ -507,16 +449,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
         {/* Center Big Play Button */}
         <div className="self-center pointer-events-auto">
-          <button
-            onClick={togglePlay}
-            className="w-16 h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-amber-300 transition-all backdrop-blur-md"
-          >
-            {isPlaying ? (
-              <Pause className="w-7 h-7 fill-current" />
-            ) : (
-              <Play className="w-7 h-7 fill-current translate-x-0.5" />
-            )}
-          </button>
+          {!isWaiting && (
+            <button
+              onClick={togglePlay}
+              className="w-16 h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-amber-300 transition-all backdrop-blur-md"
+            >
+              {isPlaying ? (
+                <Pause className="w-7 h-7 fill-current" />
+              ) : (
+                <Play className="w-7 h-7 fill-current translate-x-0.5" />
+              )}
+            </button>
+          )}
         </div>
 
         {/* Bottom Control Bar */}

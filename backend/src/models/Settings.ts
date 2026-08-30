@@ -9,7 +9,10 @@ export interface ISettings extends Document {
   autoResume: boolean;
   autoplay: boolean;
   autoLockDuration: number; // in minutes, 0 means Never
-  privacyTabHidden: boolean;
+  privacyTabHidden: boolean; // Lock on tab switch
+  lockOnWindowBlur: boolean; // Lock when browser loses focus
+  pauseOnTabSwitch: boolean; // Pause video when switching tabs
+  keyboardShortcuts: boolean; // Enable panic & player hotkeys
   saveWatchHistory: boolean;
   theme: string;
   layout: string;
@@ -26,6 +29,9 @@ const settingsSchema = new Schema<ISettings>(
     autoplay: { type: Boolean, default: false },
     autoLockDuration: { type: Number, default: 15 },
     privacyTabHidden: { type: Boolean, default: false },
+    lockOnWindowBlur: { type: Boolean, default: false },
+    pauseOnTabSwitch: { type: Boolean, default: true },
+    keyboardShortcuts: { type: Boolean, default: true },
     saveWatchHistory: { type: Boolean, default: true },
     theme: { type: String, default: 'dark' },
     layout: { type: String, default: 'comfortable' },

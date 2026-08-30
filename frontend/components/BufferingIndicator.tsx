@@ -147,11 +147,6 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
           className="absolute top-0 bottom-0 bg-amber-400 rounded-full shadow-lg shadow-amber-400/50"
           style={{ width: `${playedPercent}%` }}
         />
-
-        {/* Pulsing Loading Glow while Buffering */}
-        {isBuffering && (
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-300/30 to-transparent animate-pulse" />
-        )}
       </div>
 
       {/* Scrubber Thumb Knob */}

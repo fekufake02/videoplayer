@@ -1,6 +1,6 @@
 {
-  "name": "Metime",
-  "description": "Private video vault with seamless playback control, watch history, and privacy locks",
+  "name": "My Vault",
+  "description": "Secure vault with seamless playback control, watch history, and privacy locks",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

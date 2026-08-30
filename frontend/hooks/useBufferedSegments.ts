@@ -49,7 +49,7 @@ export const useBufferedSegments = (
       bufferedRanges: ranges,
       totalBuffered,
       percentBuffered,
-      isBuffering: video.networkState === 2 && video.readyState < 3,
+      isBuffering: video.readyState < 3 && !video.paused,
     });
   }, [videoRef]);
 
@@ -59,10 +59,16 @@ export const useBufferedSegments = (
     const video = videoRef.current;
     video.addEventListener('progress', updateBufferedState);
     video.addEventListener('loadedmetadata', updateBufferedState);
+    video.addEventListener('loadeddata', updateBufferedState);
+    video.addEventListener('timeupdate', updateBufferedState);
+    video.addEventListener('seeked', updateBufferedState);
 
     return () => {
       video.removeEventListener('progress', updateBufferedState);
       video.removeEventListener('loadedmetadata', updateBufferedState);
+      video.removeEventListener('loadeddata', updateBufferedState);
+      video.removeEventListener('timeupdate', updateBufferedState);
+      video.removeEventListener('seeked', updateBufferedState);
     };
   }, [videoRef, updateBufferedState]);
 

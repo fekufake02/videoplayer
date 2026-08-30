@@ -34,6 +34,9 @@ interface ISettingsItem {
   autoplay: boolean;
   autoLockDuration: number;
   privacyTabHidden: boolean;
+  lockOnWindowBlur?: boolean;
+  pauseOnTabSwitch?: boolean;
+  keyboardShortcuts?: boolean;
   saveWatchHistory: boolean;
   theme: 'dark' | 'light' | 'system';
   layout: 'comfortable' | 'compact';
@@ -155,6 +158,9 @@ let globalSettings: ISettingsItem = {
   autoplay: false,
   autoLockDuration: 15,
   privacyTabHidden: false,
+  lockOnWindowBlur: false,
+  pauseOnTabSwitch: true,
+  keyboardShortcuts: true,
   saveWatchHistory: true,
   theme: 'dark',
   layout: 'comfortable',

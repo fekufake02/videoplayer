@@ -10,8 +10,8 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: 'Metime — Private Video Vault',
-  description: 'Your elegant private video space with seamless playback control.',
+  title: 'My Vault',
+  description: 'Your elegant media vault with seamless playback control.',
   robots: {
     index: false,
     follow: false,

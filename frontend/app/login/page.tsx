@@ -36,13 +36,13 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4 bg-black">
       <div className="max-w-sm w-full glass-panel p-8 rounded-3xl shadow-2xl border border-white/10 text-center flex flex-col items-center">
-        {/* Metime Emblem Logo */}
+        {/* My Vault Emblem Logo */}
         <div className="w-16 h-16 rounded-2xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-2xl shadow-amber-400/20 text-3xl mb-6">
-          M
+          V
         </div>
 
         <h1 className="text-3xl font-extrabold tracking-tight text-white mb-1">
-          Metime
+          My Vault
         </h1>
         <p className="text-xs text-zinc-400 mb-6">
           Enter master password to unlock your private vault.
