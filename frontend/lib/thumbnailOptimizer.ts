@@ -48,14 +48,44 @@ export async function canvasToWebP(
   quality: number = 0.8
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error('Canvas to Blob conversion failed'));
-      },
-      'image/webp',
-      quality
-    );
+    try {
+      canvas.toBlob(
+        (blob) => {
+          if (blob && blob.size > 0) {
+            resolve(blob);
+          } else {
+            // Fallback to jpeg if webp is unsupported
+            canvas.toBlob(
+              (jpgBlob) => {
+                if (jpgBlob && jpgBlob.size > 0) {
+                  resolve(jpgBlob);
+                } else {
+                  try {
+                    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    const byteString = atob(dataUrl.split(',')[1]);
+                    const mimeString = dataUrl.split(',')[0].split(':')[1].split(';')[0];
+                    const ab = new ArrayBuffer(byteString.length);
+                    const ia = new Uint8Array(ab);
+                    for (let i = 0; i < byteString.length; i++) {
+                      ia[i] = byteString.charCodeAt(i);
+                    }
+                    resolve(new Blob([ab], { type: mimeString }));
+                  } catch (dataUrlErr) {
+                    reject(new Error('Canvas to Blob conversion failed'));
+                  }
+                }
+              },
+              'image/jpeg',
+              quality
+            );
+          }
+        },
+        'image/webp',
+        quality
+      );
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 

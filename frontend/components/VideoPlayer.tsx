@@ -344,6 +344,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       <video
         ref={videoRef}
         src={streamUrl}
+        crossOrigin="anonymous"
+        preload="auto"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onWaiting={() => setIsWaiting(true)}

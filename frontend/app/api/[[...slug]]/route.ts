@@ -437,16 +437,46 @@ export async function GET(
     const videoId = slug[1];
     const video = globalVideos.get(videoId);
     if (!video) {
-      return new NextResponse('Video not found', { status: 404 });
+      return new NextResponse('Video not found', {
+        status: 404,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      });
     }
 
     const uploaded = uploadedBlobs.get(video.storageKey);
     if (uploaded) {
+      const totalSize = uploaded.buffer.length;
+      const range = req.headers.get('range');
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10) || 0;
+        const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        const chunk = uploaded.buffer.subarray(start, end + 1);
+
+        return new NextResponse(new Uint8Array(chunk), {
+          status: 206,
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunk.length.toString(),
+            'Content-Type': uploaded.mimeType,
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+          },
+        });
+      }
+
       return new NextResponse(new Uint8Array(uploaded.buffer), {
+        status: 200,
         headers: {
           'Content-Type': uploaded.mimeType,
-          'Content-Length': uploaded.buffer.length.toString(),
+          'Content-Length': totalSize.toString(),
           'Accept-Ranges': 'bytes',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
         },
       });
     }
@@ -455,25 +485,62 @@ export async function GET(
       return NextResponse.redirect(video.streamUrl);
     }
 
-    return new NextResponse('Media content not stored', { status: 404 });
+    return new NextResponse('Media content not stored', {
+      status: 404,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+    });
   }
 
   // 8.1 Upload receiver GET handler for uploaded thumbnails and videos: /api/upload-receiver?key=...
   if (path === 'upload-receiver') {
     const key = req.nextUrl.searchParams.get('key');
     if (!key) {
-      return new NextResponse('Missing key param', { status: 400 });
+      return new NextResponse('Missing key param', {
+        status: 400,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      });
     }
     const uploaded = uploadedBlobs.get(key);
     if (uploaded) {
+      const totalSize = uploaded.buffer.length;
+      const range = req.headers.get('range');
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10) || 0;
+        const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        const chunk = uploaded.buffer.subarray(start, end + 1);
+
+        return new NextResponse(new Uint8Array(chunk), {
+          status: 206,
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunk.length.toString(),
+            'Content-Type': uploaded.mimeType,
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+          },
+        });
+      }
+
       return new NextResponse(new Uint8Array(uploaded.buffer), {
+        status: 200,
         headers: {
           'Content-Type': uploaded.mimeType,
-          'Content-Length': uploaded.buffer.length.toString(),
+          'Content-Length': totalSize.toString(),
+          'Accept-Ranges': 'bytes',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
         },
       });
     }
-    return new NextResponse('Resource not found', { status: 404 });
+    return new NextResponse('Resource not found', {
+      status: 404,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+    });
   }
 
   // 9. Single Video Details: /api/videos/:id
@@ -910,18 +977,41 @@ export async function PUT(
   if (path === 'upload-receiver') {
     const key = req.nextUrl.searchParams.get('key');
     if (!key) {
-      return new NextResponse('Missing key param', { status: 400 });
+      return new NextResponse('Missing key param', {
+        status: 400,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      });
     }
 
     try {
       const buffer = Buffer.from(await req.arrayBuffer());
       const mimeType = req.headers.get('content-type') || 'video/mp4';
       uploadedBlobs.set(key, { buffer, mimeType });
-      return new NextResponse('OK', { status: 200 });
+      return new NextResponse('OK', {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      });
     } catch (e: any) {
-      return new NextResponse('Upload error', { status: 500 });
+      return new NextResponse('Upload error', {
+        status: 500,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+      });
     }
   }
 
-  return new NextResponse('Not found', { status: 404 });
+  return new NextResponse('Not found', {
+    status: 404,
+    headers: { 'Access-Control-Allow-Origin': '*' },
+  });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH',
+      'Access-Control-Allow-Headers': '*',
+    },
+  });
 }

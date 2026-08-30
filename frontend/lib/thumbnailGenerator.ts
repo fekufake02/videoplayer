@@ -4,7 +4,7 @@ import { api } from './api';
 import { canvasToWebP, generateBlurhashFromCanvas } from './thumbnailOptimizer';
 
 /**
- * Creates a clean fallback canvas graphic if video decoding is blocked by CORS
+ * Creates a clean fallback canvas graphic if video decoding is blocked
  */
 function createFallbackCanvas(label: string = 'Video'): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
@@ -14,9 +14,9 @@ function createFallbackCanvas(label: string = 'Video'): HTMLCanvasElement {
   if (ctx) {
     // Dark modern gradient background
     const grad = ctx.createLinearGradient(0, 0, 640, 360);
-    grad.addColorStop(0, '#0f172a');
+    grad.addColorStop(0, '#090d16');
     grad.addColorStop(0.5, '#1e1b4b');
-    grad.addColorStop(1, '#090d16');
+    grad.addColorStop(1, '#0f172a');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 640, 360);
 
@@ -26,7 +26,7 @@ function createFallbackCanvas(label: string = 'Video'): HTMLCanvasElement {
     ctx.roundRect(280, 120, 80, 80, 20);
     ctx.fill();
 
-    // Play icon or initial
+    // Play icon
     ctx.fillStyle = '#000000';
     ctx.beginPath();
     ctx.moveTo(312, 145);
@@ -36,7 +36,7 @@ function createFallbackCanvas(label: string = 'Video'): HTMLCanvasElement {
     ctx.fill();
 
     // Text title
-    ctx.fillStyle = '#e2e8f0';
+    ctx.fillStyle = '#f1f5f9';
     ctx.font = 'bold 22px system-ui, sans-serif';
     ctx.textAlign = 'center';
     const displayLabel = label.length > 30 ? label.slice(0, 28) + '...' : label;
@@ -50,149 +50,180 @@ function createFallbackCanvas(label: string = 'Video'): HTMLCanvasElement {
 }
 
 /**
- * Extract frame from video at specific timestamp (default 15s to avoid black intros)
+ * Extract frame from video at specific timestamp (default 15s)
+ * Supports: HTMLCanvasElement, HTMLVideoElement, File/Blob, or URL string
  */
 export async function extractVideoFrame(
-  videoSource: string | File | HTMLVideoElement | HTMLCanvasElement,
+  videoSource: string | File | Blob | HTMLVideoElement | HTMLCanvasElement,
   timestamp: number = 15,
   labelFallback: string = 'Video'
 ): Promise<HTMLCanvasElement> {
-  // If already a canvas, return immediately
+  // 1. If already an HTMLCanvasElement, return directly
   if (typeof HTMLCanvasElement !== 'undefined' && videoSource instanceof HTMLCanvasElement) {
     return videoSource;
   }
 
-  // If already an active HTMLVideoElement
+  // 2. If an active playing HTMLVideoElement is passed (Snap Frame)
   if (typeof HTMLVideoElement !== 'undefined' && videoSource instanceof HTMLVideoElement) {
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoSource.videoWidth || 640;
-      canvas.height = videoSource.videoHeight || 360;
-      const ctx = canvas.getContext('2d');
-      if (ctx && canvas.width > 0 && canvas.height > 0) {
-        ctx.drawImage(videoSource, 0, 0, canvas.width, canvas.height);
-        // Test if canvas is tainted
-        canvas.toDataURL('image/webp', 0.1);
-        return canvas;
-      }
-    } catch {
-      // Continue to URL / Blob method if active video is tainted
-    }
-  }
-
-  // Handle File, Blob, or URL string
-  const isFile = typeof videoSource !== 'string';
-  let videoUrl: string;
-  let isBlobUrl = false;
-
-  if (isFile) {
-    videoUrl = URL.createObjectURL(videoSource as File);
-    isBlobUrl = true;
-  } else {
-    // If URL string, first try fetching a chunk as Blob to avoid CORS/tainting
-    const sourceStr = videoSource as string;
-    try {
-      // Try fetching first ~5MB chunk or full blob with Range header
-      const resp = await fetch(sourceStr, {
-        headers: { Range: 'bytes=0-5242880' },
-      });
-      if (resp.ok || resp.status === 206) {
-        const blob = await resp.blob();
-        if (blob.size > 1000) {
-          videoUrl = URL.createObjectURL(blob);
-          isBlobUrl = true;
-        } else {
-          videoUrl = sourceStr;
+    if (videoSource.videoWidth > 0 && videoSource.videoHeight > 0) {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = videoSource.videoWidth;
+        canvas.height = videoSource.videoHeight;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (ctx) {
+          ctx.drawImage(videoSource, 0, 0, canvas.width, canvas.height);
+          // Verify canvas is readable and untainted
+          canvas.toDataURL('image/jpeg', 0.1);
+          return canvas;
         }
-      } else {
-        videoUrl = sourceStr;
+      } catch (e) {
+        console.warn('Direct HTMLVideoElement draw tainted or unavailable, falling back to seek URL:', e);
       }
-    } catch {
-      videoUrl = sourceStr;
     }
   }
 
+  // 3. Resolve video source URL
+  let isBlobUrl = false;
+  let videoUrl: string = '';
+
+  if (typeof videoSource !== 'string') {
+    if (typeof File !== 'undefined' && videoSource instanceof File) {
+      videoUrl = URL.createObjectURL(videoSource);
+      isBlobUrl = true;
+    } else if (typeof Blob !== 'undefined' && videoSource instanceof Blob) {
+      videoUrl = URL.createObjectURL(videoSource);
+      isBlobUrl = true;
+    } else if (typeof HTMLVideoElement !== 'undefined' && videoSource instanceof HTMLVideoElement) {
+      videoUrl = videoSource.currentSrc || videoSource.src;
+    }
+  } else {
+    videoUrl = videoSource;
+  }
+
+  if (!videoUrl) {
+    return createFallbackCanvas(labelFallback);
+  }
+
+  // 4. Create an offscreen video element to seek and capture the exact frame
   return new Promise((resolve) => {
     const video = document.createElement('video');
-    if (!isBlobUrl) {
-      video.crossOrigin = 'anonymous';
-    }
+    video.crossOrigin = 'anonymous';
     video.preload = 'auto';
     video.muted = true;
     video.playsInline = true;
+    video.autoplay = false;
 
     let timeoutId: NodeJS.Timeout | null = null;
     let resolved = false;
+    let hasSeeked = false;
 
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('seeked', handleSeeked);
       video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('error', handleError);
       if (isBlobUrl) {
         URL.revokeObjectURL(videoUrl);
       }
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
     };
 
     const tryCaptureFrame = (): boolean => {
       if (resolved) return true;
       try {
+        if (!video.videoWidth || !video.videoHeight) return false;
         const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 360;
-        const ctx = canvas.getContext('2d');
-        if (!ctx || canvas.width === 0 || canvas.height === 0) return false;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return false;
 
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        // Test if canvas is tainted
-        canvas.toDataURL('image/webp', 0.1);
+        // Test export to make sure it's valid & untainted
+        canvas.toDataURL('image/jpeg', 0.1);
+
         resolved = true;
         cleanup();
         resolve(canvas);
         return true;
-      } catch {
+      } catch (err) {
+        console.warn('tryCaptureFrame error:', err);
         return false;
       }
     };
 
     const handleSeeked = () => {
-      if (!tryCaptureFrame()) {
-        resolved = true;
-        cleanup();
-        resolve(createFallbackCanvas(labelFallback));
+      if (tryCaptureFrame()) return;
+      // Allow video decoder a frame tick
+      setTimeout(() => {
+        if (!tryCaptureFrame() && !resolved) {
+          resolved = true;
+          cleanup();
+          resolve(createFallbackCanvas(labelFallback));
+        }
+      }, 50);
+    };
+
+    const handleTimeUpdate = () => {
+      if (hasSeeked && video.readyState >= 2) {
+        tryCaptureFrame();
+      }
+    };
+
+    const handleCanPlay = () => {
+      if (hasSeeked && video.readyState >= 2) {
+        tryCaptureFrame();
       }
     };
 
     const handleLoadedData = () => {
-      // If we don't need seeking (or 0s), or as early snapshot
-      if (video.currentTime === 0 && timestamp <= 1) {
+      if (video.readyState >= 2 && !hasSeeked && timestamp <= 0.5) {
         tryCaptureFrame();
       }
     };
 
     const handleLoadedMetadata = () => {
       const duration = video.duration || 0;
-      const targetTime = duration > (timestamp + 1)
-        ? timestamp
-        : (duration > 2 ? duration * 0.5 : Math.max(0.1, duration * 0.2));
+      let targetTime = timestamp;
 
+      if (duration > 0) {
+        if (targetTime > duration) {
+          targetTime = Math.max(0.1, duration - 0.5);
+        } else if (targetTime <= 0) {
+          targetTime = Math.min(1, duration * 0.1);
+        }
+      }
+
+      hasSeeked = true;
       try {
         video.currentTime = targetTime;
       } catch {
-        // If seeking fails, attempt immediate capture
         tryCaptureFrame();
       }
     };
 
     const handleError = () => {
       if (resolved) return;
+      console.warn('Video frame capture error event on video element');
+      // If anonymous CORS failed, try without crossOrigin as fallback
+      if (video.crossOrigin) {
+        video.removeAttribute('crossorigin');
+        video.src = videoUrl;
+        video.load();
+        return;
+      }
       resolved = true;
       cleanup();
       resolve(createFallbackCanvas(labelFallback));
     };
 
-    // 8-second safety timeout: fallback gracefully instead of throwing
+    // Safety timeout: 10s
     timeoutId = setTimeout(() => {
       if (resolved) return;
       if (!tryCaptureFrame()) {
@@ -200,11 +231,13 @@ export async function extractVideoFrame(
         cleanup();
         resolve(createFallbackCanvas(labelFallback));
       }
-    }, 8000);
+    }, 10000);
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('error', handleError);
 
     video.src = videoUrl;
@@ -221,7 +254,7 @@ export interface ThumbnailGenerationResult {
  * Generate and upload thumbnail for a video (15s timestamp default)
  */
 export async function generateAndUploadThumbnail(
-  videoSource: string | File | HTMLVideoElement | HTMLCanvasElement,
+  videoSource: string | File | Blob | HTMLVideoElement | HTMLCanvasElement,
   originalFilename: string,
   timestamp: number = 15
 ): Promise<ThumbnailGenerationResult | null> {
@@ -238,7 +271,7 @@ export async function generateAndUploadThumbnail(
     }
 
     // Compress to WebP (<20KB)
-    const blob = await canvasToWebP(canvas, 0.75);
+    const blob = await canvasToWebP(canvas, 0.8);
 
     // Clean sanitized filename
     const safeBaseName = (originalFilename || 'video')
@@ -280,7 +313,7 @@ export async function generateAndUploadThumbnail(
 }
 
 /**
- * Reprocess and update thumbnail for a single video at a specific timestamp
+ * Reprocess and update thumbnail for a single video at a specific timestamp or from live frame
  */
 export async function reprocessSingleVideoThumbnail(
   videoId: string,
@@ -290,9 +323,27 @@ export async function reprocessSingleVideoThumbnail(
   videoElement?: HTMLVideoElement | null
 ): Promise<{ success: boolean; thumbnailKey?: string; blurhash?: string; error?: string }> {
   try {
-    // If video element from player is passed, use it directly or streamUrl
-    let source: string | HTMLVideoElement = videoElement || '';
-    if (!videoElement || videoElement.readyState < 2) {
+    let source: string | File | Blob | HTMLVideoElement | HTMLCanvasElement;
+
+    // If active video element is provided (for Snap Frame)
+    if (videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+      try {
+        const snapCanvas = document.createElement('canvas');
+        snapCanvas.width = videoElement.videoWidth;
+        snapCanvas.height = videoElement.videoHeight;
+        const ctx = snapCanvas.getContext('2d', { willReadFrequently: true });
+        if (ctx) {
+          ctx.drawImage(videoElement, 0, 0, snapCanvas.width, snapCanvas.height);
+          snapCanvas.toDataURL('image/jpeg', 0.5);
+          source = snapCanvas;
+        } else {
+          source = customStreamUrl || '';
+        }
+      } catch (taintErr) {
+        console.warn('Direct canvas draw tainted, falling back to stream URL seeking:', taintErr);
+        source = customStreamUrl || '';
+      }
+    } else {
       let streamUrl = customStreamUrl;
       if (!streamUrl) {
         const streamRes = await api.getStreamUrl(videoId, true);
@@ -323,6 +374,10 @@ export async function reprocessSingleVideoThumbnail(
     };
   }
 }
+
+/**
+ * Batch generate thumbnails for multiple videos
+ */
 export async function batchGenerateThumbnails(
   videos: Array<{
     id: string;
@@ -342,7 +397,6 @@ export async function batchGenerateThumbnails(
     const displayTitle = video.title || video.originalFilename || `Video ${i + 1}`;
 
     try {
-      // Fetch fresh stream URL if not already provided
       let streamUrl = video.streamUrl;
       if (!streamUrl) {
         const streamRes = await api.getStreamUrl(video.id);
@@ -353,11 +407,9 @@ export async function batchGenerateThumbnails(
         throw new Error('Could not acquire temporary stream URL');
       }
 
-      // Generate & upload thumbnail at designated timestamp (15s default)
       const result = await generateAndUploadThumbnail(streamUrl, video.originalFilename, timestamp);
 
       if (result?.thumbnailKey) {
-        // Attach thumbnail key and blurhash to video record
         await api.attachThumbnail(video.id, result.thumbnailKey, result.blurhash);
         successCount++;
         if (onProgress) {
@@ -377,9 +429,8 @@ export async function batchGenerateThumbnails(
       }
     }
 
-    // Rate limiting delay between generations to ensure smooth client performance
     if (i < videos.length - 1) {
-      await delay(250);
+      await delay(200);
     }
   }
 

@@ -111,12 +111,14 @@ export default function WatchPage() {
       );
 
       if (res.success && res.thumbnailKey) {
+        const newKey = res.thumbnailKey;
         setVideo((prev) =>
           prev
             ? {
                 ...prev,
-                thumbnailKey: res.thumbnailKey,
+                thumbnailKey: newKey,
                 blurhash: res.blurhash,
+                thumbnailUrl: `/api/upload-receiver?key=${encodeURIComponent(newKey)}`,
               }
             : null
         );
