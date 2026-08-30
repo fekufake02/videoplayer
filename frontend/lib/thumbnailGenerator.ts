@@ -4,11 +4,11 @@ import { api } from './api';
 import { canvasToWebP, generateBlurhashFromCanvas } from './thumbnailOptimizer';
 
 /**
- * Extract frame from video at specific timestamp
+ * Extract frame from video at specific timestamp (default 15s to avoid black intros)
  */
 export async function extractVideoFrame(
   videoSource: string | File,
-  timestamp: number = 0.5
+  timestamp: number = 15
 ): Promise<HTMLCanvasElement> {
   const isFile = typeof videoSource !== 'string';
   const videoUrl = isFile ? URL.createObjectURL(videoSource) : videoSource;
@@ -20,14 +20,23 @@ export async function extractVideoFrame(
     video.muted = true;
     video.playsInline = true;
 
+    let timeoutId: NodeJS.Timeout | null = null;
+
     const handleLoadedMetadata = () => {
-      video.currentTime = Math.min(timestamp, video.duration * 0.9);
+      const duration = video.duration || 0;
+      // If video has sufficient duration (>16s), seek to timestamp (15s).
+      // If shorter, seek to middle/active portion (e.g. 50%) to avoid black intro frames
+      const targetTime = duration > (timestamp + 1)
+        ? timestamp
+        : (duration > 2 ? duration * 0.5 : Math.max(0.1, duration * 0.2));
+
+      video.currentTime = targetTime;
     };
 
     const handleSeeked = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 360;
 
       const ctx = canvas.getContext('2d');
       if (!ctx) {
@@ -36,7 +45,7 @@ export async function extractVideoFrame(
         return;
       }
 
-      ctx.drawImage(video, 0, 0);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       cleanup();
       resolve(canvas);
     };
@@ -47,6 +56,7 @@ export async function extractVideoFrame(
     };
 
     const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.removeEventListener('seeked', handleSeeked);
       video.removeEventListener('error', handleError);
@@ -54,6 +64,12 @@ export async function extractVideoFrame(
         URL.revokeObjectURL(videoUrl);
       }
     };
+
+    // 15-second safety timeout in case video fails to decode
+    timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error('Video frame extraction timed out'));
+    }, 15000);
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('seeked', handleSeeked);
@@ -69,12 +85,12 @@ export interface ThumbnailGenerationResult {
 }
 
 /**
- * Generate and upload thumbnail for a video
+ * Generate and upload thumbnail for a video (15s timestamp default)
  */
 export async function generateAndUploadThumbnail(
   videoSource: string | File,
   originalFilename: string,
-  timestamp: number = 1
+  timestamp: number = 15
 ): Promise<ThumbnailGenerationResult | null> {
   try {
     // Extract frame from video
@@ -132,7 +148,7 @@ export async function generateAndUploadThumbnail(
 
 /**
  * Batch generate thumbnails for multiple videos
- * Used for migrating existing videos (200+ collection)
+ * Used for migrating/reprocessing existing videos (200+ collection)
  */
 export async function batchGenerateThumbnails(
   videos: Array<{
@@ -141,7 +157,8 @@ export async function batchGenerateThumbnails(
     originalFilename: string;
     title?: string;
   }>,
-  onProgress?: (current: number, total: number, currentTitle?: string, isSuccess?: boolean) => void
+  onProgress?: (current: number, total: number, currentTitle?: string, isSuccess?: boolean) => void,
+  timestamp: number = 15
 ): Promise<{ success: number; failed: number }> {
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let successCount = 0;
@@ -163,8 +180,8 @@ export async function batchGenerateThumbnails(
         throw new Error('Could not acquire temporary stream URL');
       }
 
-      // Generate & upload thumbnail
-      const result = await generateAndUploadThumbnail(streamUrl, video.originalFilename);
+      // Generate & upload thumbnail at designated timestamp (15s default)
+      const result = await generateAndUploadThumbnail(streamUrl, video.originalFilename, timestamp);
 
       if (result?.thumbnailKey) {
         // Attach thumbnail key and blurhash to video record

@@ -15,7 +15,12 @@ import {
   Clock,
   EyeOff,
   Lock,
+  Sparkles,
+  Loader2,
+  RotateCcw,
+  Film,
 } from 'lucide-react';
+import { batchGenerateThumbnails } from '../../lib/thumbnailGenerator';
 
 export default function SettingsPage() {
   const { settings, refreshSettings, isAuthenticated, isLoading } = useAuth();
@@ -38,6 +43,17 @@ export default function SettingsPage() {
 
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState<boolean>(false);
   const [isClearingHistory, setIsClearingHistory] = useState<boolean>(false);
+
+  // Reprocess Thumbnails State
+  const [thumbnailTimestamp, setThumbnailTimestamp] = useState<number>(15);
+  const [isReprocessingThumbnails, setIsReprocessingThumbnails] = useState<boolean>(false);
+  const [reprocessProgress, setReprocessProgress] = useState<{
+    current: number;
+    total: number;
+    currentTitle: string;
+    successCount: number;
+    failedCount: number;
+  } | null>(null);
 
   useEffect(() => {
     if (settings) {
@@ -294,6 +310,165 @@ export default function SettingsPage() {
                 <Trash2 className="w-3.5 h-3.5" />
                 Clear History
               </button>
+            </div>
+          </section>
+
+          {/* Thumbnail Generation & Reprocessing */}
+          <section className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-6">
+            <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              Video Thumbnail Reprocessing
+            </h2>
+
+            <div className="space-y-4 text-xs">
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-semibold text-white mb-1 flex items-center gap-2">
+                      <Film className="w-4 h-4 text-amber-400" />
+                      Reprocess All Video Thumbnails (15s Timestamp)
+                    </h4>
+                    <p className="text-slate-400 max-w-xl leading-relaxed">
+                      Replaces existing thumbnails across your full collection (200+ videos stored on B2) by extracting high-contrast frames at the <strong className="text-amber-300 font-medium">15-second timestamp</strong> (avoiding black title cards & fade-ins) into compressed WebP & Blurhash placeholders.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+                      <span className="text-[11px] text-slate-400">Timestamp:</span>
+                      <select
+                        value={thumbnailTimestamp}
+                        disabled={isReprocessingThumbnails}
+                        onChange={(e) => setThumbnailTimestamp(Number(e.target.value))}
+                        className="bg-transparent text-amber-400 font-semibold text-xs focus:outline-none cursor-pointer"
+                      >
+                        <option value="5" className="bg-slate-900 text-white">5s</option>
+                        <option value="10" className="bg-slate-900 text-white">10s</option>
+                        <option value="15" className="bg-slate-900 text-amber-400 font-bold">15s (Recommended)</option>
+                        <option value="20" className="bg-slate-900 text-white">20s</option>
+                        <option value="30" className="bg-slate-900 text-white">30s</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isReprocessingThumbnails}
+                      onClick={async () => {
+                        try {
+                          setIsReprocessingThumbnails(true);
+                          setSuccessMsg('Scanning video library for all uploaded videos...');
+                          setErrorMsg('');
+
+                          // 1. Fetch entire video collection across all pages
+                          const allVideos = await api.getAllVideos();
+
+                          if (allVideos.length === 0) {
+                            setSuccessMsg('No videos found in library.');
+                            setIsReprocessingThumbnails(false);
+                            return;
+                          }
+
+                          setReprocessProgress({
+                            current: 0,
+                            total: allVideos.length,
+                            currentTitle: allVideos[0]?.title || 'Starting reprocessing...',
+                            successCount: 0,
+                            failedCount: 0,
+                          });
+
+                          const formattedList = allVideos.map((v) => ({
+                            id: v._id,
+                            originalFilename: v.originalFilename || `${v.title}.mp4`,
+                            title: v.title,
+                          }));
+
+                          // 2. Batch process and upload each new thumbnail at chosen timestamp (15s default)
+                          const result = await batchGenerateThumbnails(
+                            formattedList,
+                            (current, total, currentTitle, isSuccess) => {
+                              setReprocessProgress((prev) => ({
+                                current,
+                                total,
+                                currentTitle: currentTitle || `Video ${current}`,
+                                successCount: (prev?.successCount || 0) + (isSuccess ? 1 : 0),
+                                failedCount: (prev?.failedCount || 0) + (isSuccess ? 0 : 1),
+                              }));
+                            },
+                            thumbnailTimestamp
+                          );
+
+                          setSuccessMsg(
+                            `Successfully reprocessed ${result.success} thumbnails at ${thumbnailTimestamp}s! (${result.failed} skipped)`
+                          );
+                        } catch (e: any) {
+                          console.error('Reprocess thumbnails error:', e);
+                          setErrorMsg(e.message || 'Failed to reprocess video thumbnails.');
+                        } finally {
+                          setIsReprocessingThumbnails(false);
+                        }
+                      }}
+                      className={`px-4 py-2.5 text-black font-semibold rounded-xl text-xs whitespace-nowrap transition-all shadow-md flex items-center gap-2 ${
+                        isReprocessingThumbnails
+                          ? 'bg-amber-600/50 cursor-not-allowed text-amber-200'
+                          : 'bg-amber-500 hover:bg-amber-400'
+                      }`}
+                    >
+                      {isReprocessingThumbnails ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Reprocessing ({reprocessProgress?.current || 0}/{reprocessProgress?.total || 0})
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          Reprocess All Videos ({thumbnailTimestamp}s)
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Real-time Progress Bar */}
+                {reprocessProgress && (
+                  <div className="p-3.5 bg-zinc-950/90 rounded-xl border border-slate-800 space-y-2 mt-3">
+                    <div className="flex items-center justify-between text-[11px] text-slate-300">
+                      <span className="truncate max-w-[280px] sm:max-w-md font-mono text-amber-400">
+                        {isReprocessingThumbnails ? 'Capturing at ' + thumbnailTimestamp + 's: ' : 'Completed: '}
+                        {reprocessProgress.currentTitle}
+                      </span>
+                      <span className="font-semibold text-slate-200 font-mono">
+                        {reprocessProgress.current} / {reprocessProgress.total} (
+                        {Math.round(
+                          (reprocessProgress.current / Math.max(1, reprocessProgress.total)) * 100
+                        )}%)
+                      </span>
+                    </div>
+
+                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-500 to-amber-300 rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            (reprocessProgress.current / Math.max(1, reprocessProgress.total)) * 100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                      <span className="text-emerald-400 font-medium">
+                        ✓ {reprocessProgress.successCount} replaced & uploaded to B2
+                      </span>
+                      {reprocessProgress.failedCount > 0 && (
+                        <span className="text-rose-400 font-medium">
+                          ✕ {reprocessProgress.failedCount} skipped
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </section>
 
