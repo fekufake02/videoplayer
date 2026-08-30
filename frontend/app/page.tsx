@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { IVideo, HomeSections } from '../types';
@@ -11,6 +11,7 @@ import { UploadModal } from '../components/UploadModal';
 import { EditMetadataModal } from '../components/EditMetadataModal';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
 import { PlayCircle, Clock, Flame, Sparkles } from 'lucide-react';
+import { getLibraryState, saveLibraryState } from '../lib/libraryState';
 
 export default function LibraryHomePage() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -24,17 +25,74 @@ export default function LibraryHomePage() {
 
   const [gridVideos, setGridVideos] = useState<IVideo[]>([]);
   const [totalGrid, setTotalGrid] = useState<number>(0);
-  const [page, setPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
 
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [sort, setSort] = useState<string>('recentlyAdded');
-  const [filter, setFilter] = useState<string>('all');
+  // Initialize from previous exploration session if available
+  const [page, setPage] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = getLibraryState();
+      if (saved?.page) return saved.page;
+    }
+    return 1;
+  });
+
+  const [searchQuery, setSearchQuery] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = getLibraryState();
+      if (saved?.searchQuery) return saved.searchQuery;
+    }
+    return '';
+  });
+
+  const [sort, setSort] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = getLibraryState();
+      if (saved?.sort) return saved.sort;
+    }
+    return 'recentlyAdded';
+  });
+
+  const [filter, setFilter] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = getLibraryState();
+      if (saved?.filter) return saved.filter;
+    }
+    return 'all';
+  });
 
   // Modals state
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [editingVideo, setEditingVideo] = useState<IVideo | null>(null);
   const [deletingVideo, setDeletingVideo] = useState<IVideo | null>(null);
+
+  const hasRestoredScroll = useRef<boolean>(false);
+
+  // Track state changes to sessionStorage
+  useEffect(() => {
+    saveLibraryState({
+      page,
+      searchQuery,
+      sort,
+      filter,
+    });
+  }, [page, searchQuery, sort, filter]);
+
+  // Track window scrolling
+  useEffect(() => {
+    let scrollTimeout: NodeJS.Timeout;
+    const onScroll = () => {
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        saveLibraryState({ scrollY: window.scrollY });
+      }, 120);
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      clearTimeout(scrollTimeout);
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, []);
 
   const fetchHomeData = useCallback(async () => {
     try {
@@ -77,6 +135,35 @@ export default function LibraryHomePage() {
       fetchGridData();
     }
   }, [isAuthenticated, fetchHomeData, fetchGridData]);
+
+  // Restore scroll position or target video when grid items are rendered
+  useEffect(() => {
+    if (gridVideos.length > 0 && !hasRestoredScroll.current) {
+      const saved = getLibraryState();
+      if (saved) {
+        hasRestoredScroll.current = true;
+        const timer = setTimeout(() => {
+          if (saved.lastClickedVideoId) {
+            const cardEl = document.getElementById(`video-card-${saved.lastClickedVideoId}`);
+            if (cardEl) {
+              cardEl.scrollIntoView({ block: 'center', behavior: 'auto' });
+              // Visual feedback pulse to highlight where user left off
+              cardEl.classList.add('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background');
+              setTimeout(() => {
+                cardEl.classList.remove('ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-background');
+              }, 2500);
+              return;
+            }
+          }
+          if (saved.scrollY && saved.scrollY > 0) {
+            window.scrollTo({ top: saved.scrollY, behavior: 'auto' });
+          }
+        }, 100);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [gridVideos]);
 
   const handleRefreshAll = () => {
     fetchHomeData();

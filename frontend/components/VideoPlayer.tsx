@@ -100,10 +100,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     }
   };
 
-  // Pause playback on tab switch if enabled in settings
+  // Always pause playback immediately on tab switch or window minimize
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.hidden && settings?.pauseOnTabSwitch !== false) {
+      if (document.hidden) {
         if (videoRef.current && !videoRef.current.paused) {
           videoRef.current.pause();
           setIsPlaying(false);
@@ -113,7 +113,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [settings?.pauseOnTabSwitch]);
+  }, []);
 
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {

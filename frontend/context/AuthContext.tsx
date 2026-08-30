@@ -19,6 +19,7 @@ interface AuthContextType {
   lockApp: () => void;
   unlockApp: () => void;
   refreshSettings: () => Promise<void>;
+  updateUserSettings: (newSettings: Partial<ISettings>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,7 +30,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<IUser | null>(null);
   const [settings, setSettings] = useState<ISettings | null>(null);
   const [isPrivacyActive, setIsPrivacyActive] = useState<boolean>(false);
-  const [isLocked, setIsLocked] = useState<boolean>(false);
+  const [isLocked, setIsLocked] = useState<boolean>(true);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -41,9 +42,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsAuthenticated(true);
         setUser(data.user);
         if (data.settings) setSettings(data.settings);
+        // By default on reload it should always be locked (unless on /login)
+        if (pathname !== '/login') {
+          setIsLocked(true);
+          setIsPrivacyActive(true);
+        }
       } else {
         setIsAuthenticated(false);
         setUser(null);
+        setIsLocked(false);
+        setIsPrivacyActive(false);
         if (pathname !== '/login') {
           router.push('/login');
         }
@@ -51,6 +59,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       setIsAuthenticated(false);
       setUser(null);
+      setIsLocked(false);
+      setIsPrivacyActive(false);
       if (pathname !== '/login') {
         router.push('/login');
       }
@@ -68,6 +78,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const handleUnauthorized = () => {
       setIsAuthenticated(false);
       setUser(null);
+      setIsLocked(false);
+      setIsPrivacyActive(false);
       if (pathname !== '/login') {
         router.push('/login');
       }
@@ -83,10 +95,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsAuthenticated(true);
       setUser(data.user);
       if (data.settings) setSettings(data.settings);
-      sessionStorage.setItem('metime_unlocked', 'true');
       setIsLocked(false);
       setIsPrivacyActive(false);
-      router.push('/');
+      if (pathname === '/login') {
+        router.push('/');
+      }
     }
   };
 
@@ -96,7 +109,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (e) {
       // Ignore logout api errors if session already ended
     } finally {
-      sessionStorage.removeItem('metime_unlocked');
       setIsAuthenticated(false);
       setUser(null);
       setIsPrivacyActive(false);
@@ -114,17 +126,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const lockApp = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('metime_unlocked');
-    }
     setIsLocked(true);
     setIsPrivacyActive(true);
   }, []);
 
   const unlockApp = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('metime_unlocked', 'true');
-    }
     setIsLocked(false);
     setIsPrivacyActive(false);
   }, []);
@@ -140,48 +146,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Window switch, Desktop switch, Tab switch & Reload Privacy Lock Listeners
+  const updateUserSettings = async (newSettings: Partial<ISettings>) => {
+    // Optimistically update local state immediately
+    setSettings((prev) => (prev ? { ...prev, ...newSettings } : null));
+    try {
+      const res = await api.updateSettings(newSettings);
+      if (res.success && res.settings) {
+        setSettings(res.settings);
+      }
+    } catch (e) {
+      console.error('Failed to update settings:', e);
+      // Revert on error
+      refreshSettings();
+      throw e;
+    }
+  };
+
+  // Window switch, Desktop switch, and Tab switch Security Listeners
   useEffect(() => {
     if (!isAuthenticated) return;
-
-    const handleLock = () => {
-      lockApp();
-    };
 
     // Lock on Tab Switch ONLY if privacyTabHidden is enabled in settings
     const handleVisibilityChange = () => {
       if (document.hidden && settings?.privacyTabHidden) {
-        handleLock();
+        lockApp();
       }
     };
 
     // Lock on Window Blur ONLY if lockOnWindowBlur is enabled in settings
     const handleBlur = () => {
       if (settings?.lockOnWindowBlur) {
-        handleLock();
+        lockApp();
       }
     };
 
-    const handleBeforeUnload = () => {
-      sessionStorage.removeItem('metime_unlocked');
-    };
-
-    // Auto-lock on page reload if privacyTabHidden is active and session unlock token is missing
-    const isUnlocked = sessionStorage.getItem('metime_unlocked') === 'true';
-    if (!isUnlocked && pathname !== '/login' && settings?.privacyTabHidden) {
-      lockApp();
-    }
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
-    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isAuthenticated, lockApp, pathname, settings?.privacyTabHidden, settings?.lockOnWindowBlur]);
+  }, [isAuthenticated, lockApp, settings?.privacyTabHidden, settings?.lockOnWindowBlur]);
 
   // Inactivity auto-lock timer
   useEffect(() => {
@@ -208,7 +214,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clearTimeout(timeoutId);
       activityEvents.forEach((event) => window.removeEventListener(event, resetTimer));
     };
-  }, [settings, isAuthenticated, isLocked, lockApp]);
+  }, [settings?.autoLockDuration, isAuthenticated, isLocked, lockApp]);
 
   // Global Keyboard Shortcuts for Privacy ('P') and Lock ('Ctrl+Shift+L' / 'L')
   useEffect(() => {
@@ -260,6 +266,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         lockApp,
         unlockApp,
         refreshSettings,
+        updateUserSettings,
       }}
     >
       {children}

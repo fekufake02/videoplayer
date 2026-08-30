@@ -24,6 +24,9 @@ import {
   RotateCcw,
   Check,
   Sparkles,
+  Camera,
+  Image as ImageIcon,
+  ArrowLeft,
 } from 'lucide-react';
 import { reprocessSingleVideoThumbnail } from '../../../lib/thumbnailGenerator';
 
@@ -47,6 +50,7 @@ export default function WatchPage() {
   const [thumbnailTimestamp, setThumbnailTimestamp] = useState<number>(15);
   const [isSyncingThumbnail, setIsSyncingThumbnail] = useState<boolean>(false);
   const [thumbnailSuccessMsg, setThumbnailSuccessMsg] = useState<string>('');
+  const [thumbnailErrorMsg, setThumbnailErrorMsg] = useState<string>('');
 
   const fetchVideoAndStream = async () => {
     if (!id) return;
@@ -87,18 +91,23 @@ export default function WatchPage() {
     }
   };
 
-  const handleSyncThumbnail = async (timestampSec: number = thumbnailTimestamp) => {
+  const handleSyncThumbnail = async (timestampSec: number = thumbnailTimestamp, captureCurrent: boolean = false) => {
     if (!video || isSyncingThumbnail) return;
     setIsSyncingThumbnail(true);
     setThumbnailSuccessMsg('');
-    setError('');
+    setThumbnailErrorMsg('');
 
     try {
+      // Find active video player element in DOM if playing
+      const videoEl = document.querySelector('video') as HTMLVideoElement | null;
+      const targetTime = captureCurrent && videoEl ? Math.floor(videoEl.currentTime) : timestampSec;
+
       const res = await reprocessSingleVideoThumbnail(
         video._id,
         video.originalFilename,
-        timestampSec,
-        streamUrl
+        targetTime,
+        streamUrl,
+        captureCurrent ? videoEl : null
       );
 
       if (res.success && res.thumbnailKey) {
@@ -111,14 +120,16 @@ export default function WatchPage() {
               }
             : null
         );
-        setThumbnailSuccessMsg(`Thumbnail updated at ${timestampSec}s!`);
+        setThumbnailSuccessMsg(`Thumbnail updated! (${targetTime}s)`);
         setTimeout(() => setThumbnailSuccessMsg(''), 4000);
       } else {
-        setError(res.error || 'Failed to capture frame from video');
+        setThumbnailErrorMsg(res.error || 'Failed to capture frame from video');
+        setTimeout(() => setThumbnailErrorMsg(''), 5000);
       }
     } catch (err: any) {
       console.error('Sync thumbnail error:', err);
-      setError(err.message || 'Error updating video thumbnail');
+      setThumbnailErrorMsg(err.message || 'Error updating video thumbnail');
+      setTimeout(() => setThumbnailErrorMsg(''), 5000);
     } finally {
       setIsSyncingThumbnail(false);
     }
@@ -174,6 +185,17 @@ export default function WatchPage() {
       <Navbar />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+        {/* Top Back Navigation Breadcrumb */}
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => router.back()}
+            className="inline-flex items-center gap-2 text-xs font-semibold text-slate-300 hover:text-amber-400 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 px-3.5 py-2 rounded-xl transition-all shadow-sm group cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            <span>Back to Library</span>
+          </button>
+        </div>
+
         {loadingMedia ? (
           <div className="w-full aspect-video bg-slate-900 rounded-2xl flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
@@ -187,10 +209,11 @@ export default function WatchPage() {
             <h3 className="text-base font-semibold text-white mb-1">Error Loading Video</h3>
             <p className="text-xs text-slate-400 mb-4">{error}</p>
             <button
-              onClick={() => router.push('/')}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl"
+              onClick={() => router.back()}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl cursor-pointer inline-flex items-center gap-2"
             >
-              Return to Library
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Return to Library</span>
             </button>
           </div>
         ) : video && streamUrl ? (
@@ -230,6 +253,13 @@ export default function WatchPage() {
                     </div>
                   )}
 
+                  {thumbnailErrorMsg && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs font-medium rounded-xl animate-fade-in">
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                      <span>{thumbnailErrorMsg}</span>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleToggleFavorite}
                     className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-medium transition-all ${
@@ -251,7 +281,7 @@ export default function WatchPage() {
                     <span>{isDownloading ? 'Preparing...' : 'Download'}</span>
                   </button>
 
-                  {/* Sync Thumbnail with Timestamp Dropdown */}
+                  {/* Sync Thumbnail with Timestamp Dropdown & Capture Current Frame */}
                   <div
                     className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5"
                     title="Regenerate thumbnail image at chosen timestamp"
@@ -259,11 +289,11 @@ export default function WatchPage() {
                     <button
                       type="button"
                       disabled={isSyncingThumbnail}
-                      onClick={() => handleSyncThumbnail(thumbnailTimestamp)}
+                      onClick={() => handleSyncThumbnail(thumbnailTimestamp, false)}
                       className={`p-2 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-amber-400 transition-all flex items-center gap-1 ${
                         isSyncingThumbnail ? 'text-amber-400 cursor-not-allowed' : ''
                       }`}
-                      title={`Sync / regenerate thumbnail at ${thumbnailTimestamp}s`}
+                      title={`Sync thumbnail at ${thumbnailTimestamp}s`}
                     >
                       <RotateCcw className={`w-4 h-4 ${isSyncingThumbnail ? 'animate-spin text-amber-400' : 'text-slate-300'}`} />
                     </button>
@@ -273,7 +303,7 @@ export default function WatchPage() {
                       onChange={(e) => {
                         const newTime = Number(e.target.value);
                         setThumbnailTimestamp(newTime);
-                        handleSyncThumbnail(newTime);
+                        handleSyncThumbnail(newTime, false);
                       }}
                       className="bg-transparent text-amber-400 text-xs font-semibold py-1.5 pr-2.5 pl-1 border-l border-slate-800/80 outline-none cursor-pointer hover:text-amber-300"
                       title="Select video timestamp for thumbnail"
@@ -287,6 +317,17 @@ export default function WatchPage() {
                       <option value="60" className="bg-slate-900 text-slate-200">60s</option>
                       <option value="90" className="bg-slate-900 text-slate-200">90s</option>
                     </select>
+
+                    <button
+                      type="button"
+                      disabled={isSyncingThumbnail}
+                      onClick={() => handleSyncThumbnail(thumbnailTimestamp, true)}
+                      className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-400 hover:text-amber-400 border-l border-slate-800/80 transition-colors"
+                      title="Capture current video frame as thumbnail"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="hidden sm:inline">Snap Frame</span>
+                    </button>
                   </div>
 
                   <button

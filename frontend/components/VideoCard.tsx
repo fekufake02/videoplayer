@@ -7,6 +7,7 @@ import { Play, Heart, MoreVertical, Clock, Download, Edit3, Trash2, Tag } from '
 import { api } from '../lib/api';
 import { generateAndUploadThumbnail } from '../lib/thumbnailGenerator';
 import { ThumbnailLoader } from './ThumbnailLoader';
+import { saveLibraryState } from '../lib/libraryState';
 
 interface VideoCardProps {
   video: IVideo;
@@ -120,11 +121,22 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
   const progress = calculateProgress();
 
+  const handleCardClick = () => {
+    saveLibraryState({
+      scrollY: window.scrollY,
+      lastClickedVideoId: video._id,
+    });
+  };
+
   return (
-    <div className="group relative glass-panel rounded-2xl overflow-hidden hover:border-indigo-500/40 transition-all duration-300 flex flex-col shadow-lg">
+    <div
+      id={`video-card-${video._id}`}
+      className="group relative glass-panel rounded-2xl overflow-hidden hover:border-indigo-500/40 transition-all duration-300 flex flex-col shadow-lg"
+    >
       {/* Thumbnail Container */}
       <Link
         href={`/watch/${video._id}`}
+        onClick={handleCardClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setIsHovered(false)}
         className="relative aspect-video bg-zinc-950 overflow-hidden flex items-center justify-center"
@@ -180,6 +192,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           <div className="flex items-start justify-between gap-2 mb-1">
             <Link
               href={`/watch/${video._id}`}
+              onClick={handleCardClick}
               className="font-semibold text-sm text-slate-100 line-clamp-1 hover:text-indigo-400 transition-colors"
               title={video.title}
             >

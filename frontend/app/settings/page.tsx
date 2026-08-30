@@ -2,126 +2,101 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { api } from '../../lib/api';
 import { Navbar } from '../../components/Navbar';
 import {
-  Sliders,
   Shield,
-  Layout,
   Save,
-  Trash2,
   CheckCircle2,
   AlertCircle,
   Clock,
   EyeOff,
-  Lock,
-  Keyboard,
-  Maximize2,
-  Volume2,
-  FastForward,
-  Rewind,
-  Eye,
-  PlaySquare,
   Monitor,
+  Check,
+  Lock,
 } from 'lucide-react';
 
 export default function SettingsPage() {
-  const { settings, refreshSettings, isAuthenticated, isLoading } = useAuth();
-
-  // Playback Settings
-  const [defaultPlaybackSpeed, setDefaultPlaybackSpeed] = useState<number>(1);
-  const [defaultVolume, setDefaultVolume] = useState<number>(1);
-  const [skipBackwardDuration, setSkipBackwardDuration] = useState<number>(10);
-  const [skipForwardDuration, setSkipForwardDuration] = useState<number>(10);
-  const [autoResume, setAutoResume] = useState<boolean>(true);
-  const [autoplay, setAutoplay] = useState<boolean>(false);
-  const [pauseOnTabSwitch, setPauseOnTabSwitch] = useState<boolean>(true);
+  const { settings, updateUserSettings, refreshSettings, isAuthenticated, isLoading } = useAuth();
 
   // Privacy & Security Settings
-  const [autoLockDuration, setAutoLockDuration] = useState<number>(15);
+  const [autoLockDuration, setAutoLockDuration] = useState<number>(0);
   const [privacyTabHidden, setPrivacyTabHidden] = useState<boolean>(false);
   const [lockOnWindowBlur, setLockOnWindowBlur] = useState<boolean>(false);
-  const [keyboardShortcuts, setKeyboardShortcuts] = useState<boolean>(true);
-  const [saveWatchHistory, setSaveWatchHistory] = useState<boolean>(true);
-
-  // Appearance Settings
-  const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('dark');
-  const [layout, setLayout] = useState<'comfortable' | 'compact'>('comfortable');
 
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [successMsg, setSuccessMsg] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [lastSavedTime, setLastSavedTime] = useState<string>('');
 
-  const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState<boolean>(false);
-  const [isClearingHistory, setIsClearingHistory] = useState<boolean>(false);
-
+  // Sync with AuthContext settings
   useEffect(() => {
     if (settings) {
-      setDefaultPlaybackSpeed(settings.defaultPlaybackSpeed ?? 1);
-      setDefaultVolume(settings.defaultVolume ?? 1);
-      setSkipBackwardDuration(settings.skipBackwardDuration ?? 10);
-      setSkipForwardDuration(settings.skipForwardDuration ?? 10);
-      setAutoResume(settings.autoResume ?? true);
-      setAutoplay(settings.autoplay ?? false);
-      setPauseOnTabSwitch(settings.pauseOnTabSwitch ?? true);
-
-      setAutoLockDuration(settings.autoLockDuration ?? 15);
+      setAutoLockDuration(settings.autoLockDuration ?? 0);
       setPrivacyTabHidden(settings.privacyTabHidden ?? false);
       setLockOnWindowBlur(settings.lockOnWindowBlur ?? false);
-      setKeyboardShortcuts(settings.keyboardShortcuts ?? true);
-      setSaveWatchHistory(settings.saveWatchHistory ?? true);
-
-      setTheme(settings.theme || 'dark');
-      setLayout(settings.layout || 'comfortable');
     }
   }, [settings]);
 
-  const handleSave = async (e: React.FormEvent) => {
+  // Handle instant toggle change with auto-save
+  const handleToggleTabSwitch = async (checked: boolean) => {
+    setPrivacyTabHidden(checked);
+    setErrorMsg('');
+    try {
+      await updateUserSettings({ privacyTabHidden: checked });
+      showSuccessFeedback();
+    } catch (err: any) {
+      setPrivacyTabHidden(!checked);
+      setErrorMsg(err.message || 'Failed to update setting.');
+    }
+  };
+
+  const handleToggleFocusBlur = async (checked: boolean) => {
+    setLockOnWindowBlur(checked);
+    setErrorMsg('');
+    try {
+      await updateUserSettings({ lockOnWindowBlur: checked });
+      showSuccessFeedback();
+    } catch (err: any) {
+      setLockOnWindowBlur(!checked);
+      setErrorMsg(err.message || 'Failed to update setting.');
+    }
+  };
+
+  const handleInactivityChange = async (duration: number) => {
+    setAutoLockDuration(duration);
+    setErrorMsg('');
+    try {
+      await updateUserSettings({ autoLockDuration: duration });
+      showSuccessFeedback();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to update setting.');
+    }
+  };
+
+  const showSuccessFeedback = () => {
+    setSuccessMsg('Settings saved successfully!');
+    setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  const handleManualSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     setSuccessMsg('');
     setErrorMsg('');
 
     try {
-      await api.updateSettings({
-        defaultPlaybackSpeed,
-        defaultVolume,
-        skipBackwardDuration,
-        skipForwardDuration,
-        autoResume,
-        autoplay,
-        pauseOnTabSwitch,
-        autoLockDuration,
+      await updateUserSettings({
         privacyTabHidden,
         lockOnWindowBlur,
-        keyboardShortcuts,
-        saveWatchHistory,
-        theme,
-        layout,
+        autoLockDuration,
       });
-
       await refreshSettings();
-      setSuccessMsg('Settings saved successfully!');
-      setTimeout(() => setSuccessMsg(''), 3000);
+      showSuccessFeedback();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save settings.');
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleClearHistory = async () => {
-    setIsClearingHistory(true);
-    try {
-      await api.clearWatchHistory();
-      await refreshSettings();
-      setShowClearHistoryConfirm(false);
-      setSuccessMsg('Watch history cleared successfully.');
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to clear watch history.');
-    } finally {
-      setIsClearingHistory(false);
     }
   };
 
@@ -137,314 +112,138 @@ export default function SettingsPage() {
     <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
 
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 lg:px-8 py-8 space-y-8">
+      <main className="flex-1 max-w-3xl w-full mx-auto px-4 lg:px-8 py-8 space-y-6">
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
-            <p className="text-xs text-slate-400">Configure security, privacy, and media playback preferences.</p>
+            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
+              <Shield className="w-6 h-6 text-indigo-400" />
+              Settings
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">
+              Configure privacy locks, window blur detection, and inactivity timer.
+            </p>
           </div>
+          {lastSavedTime && (
+            <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-full">
+              <Check className="w-3.5 h-3.5" />
+              <span>Saved at {lastSavedTime}</span>
+            </div>
+          )}
         </div>
 
         {successMsg && (
-          <div className="p-3 text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4" />
+          <div className="p-3 text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl flex items-center gap-2 animate-in fade-in duration-200">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
             <span>{successMsg}</span>
           </div>
         )}
 
         {errorMsg && (
           <div className="p-3 text-xs bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl flex items-center gap-2">
-            <AlertCircle className="w-4 h-4" />
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
 
-        <form onSubmit={handleSave} className="space-y-8">
+        <form onSubmit={handleManualSave} className="space-y-6">
           {/* Privacy & Security Settings */}
-          <section className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-6">
-            <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-              <Shield className="w-4 h-4 text-indigo-400" />
-              Privacy & Session Security
+          <section className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-5">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3 uppercase tracking-wider text-slate-300">
+              <Lock className="w-4 h-4 text-indigo-400" />
+              Privacy & Auto-Lock Options
             </h2>
 
             <div className="space-y-4">
-              {/* Tab switch logout toggle */}
-              <div className="flex items-start justify-between p-3.5 bg-slate-900/60 rounded-xl border border-slate-800/80 gap-4">
+              {/* Tab Switch Lock Toggle */}
+              <div className="flex items-start justify-between p-4 bg-slate-900/70 hover:bg-slate-900/90 transition-colors rounded-xl border border-slate-800 gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <EyeOff className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs font-semibold text-white">Logout / Lock on Tab Switch</span>
+                    <span className="text-sm font-semibold text-white">Logout / Lock on Tab Switch</span>
                   </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    When enabled, the application immediately locks and returns to the PIN screen if you switch browser tabs or minimize the window. If disabled, your session stays unlocked across tabs.
+                  <p className="text-xs text-slate-400 leading-relaxed max-w-xl">
+                    When enabled, the vault immediately locks if you switch browser tabs or minimize the window.
                   </p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-0.5">
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
                   <input
                     type="checkbox"
                     checked={privacyTabHidden}
-                    onChange={(e) => setPrivacyTabHidden(e.target.checked)}
+                    onChange={(e) => handleToggleTabSwitch(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500" />
+                  <div className="w-12 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-6 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500 shadow-inner" />
                 </label>
               </div>
 
-              {/* Window blur lock toggle */}
-              <div className="flex items-start justify-between p-3.5 bg-slate-900/60 rounded-xl border border-slate-800/80 gap-4">
+              {/* Window Blur Lock Toggle */}
+              <div className="flex items-start justify-between p-4 bg-slate-900/70 hover:bg-slate-900/90 transition-colors rounded-xl border border-slate-800 gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <Monitor className="w-4 h-4 text-indigo-400" />
-                    <span className="text-xs font-semibold text-white">Lock on Window Focus Lost</span>
+                    <span className="text-sm font-semibold text-white">Lock on Window Focus Lost</span>
                   </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Automatically locks the vault when you click outside the browser or switch to another desktop application.
+                  <p className="text-xs text-slate-400 leading-relaxed max-w-xl">
+                    When enabled, automatically locks the vault when you click outside the browser or switch focus to another application.
                   </p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-0.5">
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
                   <input
                     type="checkbox"
                     checked={lockOnWindowBlur}
-                    onChange={(e) => setLockOnWindowBlur(e.target.checked)}
+                    onChange={(e) => handleToggleFocusBlur(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600" />
+                  <div className="w-12 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-6 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 shadow-inner" />
                 </label>
               </div>
 
-              {/* Auto Lock Duration */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                    Inactivity Auto-Lock Timer
-                  </label>
-                  <select
-                    value={autoLockDuration}
-                    onChange={(e) => setAutoLockDuration(parseInt(e.target.value, 10))}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  >
-                    <option value={0}>Never Auto-Lock</option>
-                    <option value={1}>1 minute</option>
-                    <option value={5}>5 minutes</option>
-                    <option value={10}>10 minutes</option>
-                    <option value={15}>15 minutes (Default)</option>
-                    <option value={30}>30 minutes</option>
-                    <option value={60}>60 minutes</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                    <Keyboard className="w-3.5 h-3.5 text-indigo-400" />
-                    Emergency Panic Hotkeys
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-2">
-                    <input
-                      type="checkbox"
-                      checked={keyboardShortcuts}
-                      onChange={(e) => setKeyboardShortcuts(e.target.checked)}
-                      className="w-4 h-4 rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0"
-                    />
-                    Enable <span className="font-mono text-indigo-300 bg-slate-900 px-1 py-0.5 rounded">P</span> for instant screen blur and <span className="font-mono text-indigo-300 bg-slate-900 px-1 py-0.5 rounded">Ctrl+Shift+L</span> for panic lock
-                  </label>
-                </div>
-              </div>
-
-              {/* Save Watch History */}
-              <div className="flex items-start justify-between p-3.5 bg-slate-900/60 rounded-xl border border-slate-800/80 gap-4 mt-2">
-                <div className="space-y-1">
+              {/* Inactivity Auto-Lock Timer */}
+              <div className="p-4 bg-slate-900/70 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-indigo-400" />
-                    <span className="text-xs font-semibold text-white">Save Watch History & Positions</span>
+                    <Clock className="w-4 h-4 text-indigo-400" />
+                    <span className="text-sm font-semibold text-white">Inactivity Auto-Lock</span>
                   </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Keeps track of playback timestamps, play counts, and recently watched lists.
-                  </p>
+                  <span className="text-xs font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-lg">
+                    {autoLockDuration === 0 ? 'Disabled' : `${autoLockDuration} min`}
+                  </span>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-0.5">
-                  <input
-                    type="checkbox"
-                    checked={saveWatchHistory}
-                    onChange={(e) => setSaveWatchHistory(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600" />
-                </label>
-              </div>
-            </div>
-
-            {/* Clear History Danger Zone */}
-            <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
-              <div>
-                <h4 className="text-xs font-semibold text-rose-400">Clear Watch History</h4>
-                <p className="text-[11px] text-slate-400">
-                  Resets all progress positions, play counts, and recently watched statistics.
+                <p className="text-xs text-slate-400">
+                  Automatically lock the application when no mouse or keyboard activity is detected.
                 </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowClearHistoryConfirm(true)}
-                className="px-3.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium rounded-xl transition-all flex items-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Clear History
-              </button>
-            </div>
-          </section>
 
-          {/* Playback Settings */}
-          <section className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-6">
-            <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-              <Sliders className="w-4 h-4 text-indigo-400" />
-              Playback Preferences
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Default Playback Speed
-                </label>
-                <select
-                  value={defaultPlaybackSpeed}
-                  onChange={(e) => setDefaultPlaybackSpeed(parseFloat(e.target.value))}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value={0.5}>0.5x</option>
-                  <option value={0.75}>0.75x</option>
-                  <option value={1}>1.0x (Normal)</option>
-                  <option value={1.25}>1.25x</option>
-                  <option value={1.5}>1.5x</option>
-                  <option value={2}>2.0x</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
-                  <span>Default Volume</span>
-                  <span className="text-indigo-400 font-mono font-semibold">{Math.round(defaultVolume * 100)}%</span>
-                </label>
-                <div className="flex items-center gap-2 mt-2">
-                  <Volume2 className="w-4 h-4 text-slate-400" />
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={defaultVolume}
-                    onChange={(e) => setDefaultVolume(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-slate-800 rounded-lg cursor-pointer accent-indigo-500"
-                  />
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1">
+                  {[
+                    { value: 0, label: 'Off' },
+                    { value: 1, label: '1 min' },
+                    { value: 2, label: '2 min' },
+                    { value: 5, label: '5 min' },
+                    { value: 10, label: '10 min' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => handleInactivityChange(option.value)}
+                      className={`py-2 px-3 rounded-xl text-xs font-medium transition-all text-center border ${
+                        autoLockDuration === option.value
+                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20 font-semibold'
+                          : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-300'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                  <Rewind className="w-3.5 h-3.5 text-indigo-400" />
-                  Skip Backward Duration
-                </label>
-                <select
-                  value={skipBackwardDuration}
-                  onChange={(e) => setSkipBackwardDuration(parseInt(e.target.value, 10))}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value={5}>5 seconds</option>
-                  <option value={10}>10 seconds (Default)</option>
-                  <option value={15}>15 seconds</option>
-                  <option value={30}>30 seconds</option>
-                  <option value={60}>60 seconds</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                  <FastForward className="w-3.5 h-3.5 text-indigo-400" />
-                  Skip Forward Duration
-                </label>
-                <select
-                  value={skipForwardDuration}
-                  onChange={(e) => setSkipForwardDuration(parseInt(e.target.value, 10))}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value={5}>5 seconds</option>
-                  <option value={10}>10 seconds (Default)</option>
-                  <option value={15}>15 seconds</option>
-                  <option value={30}>30 seconds</option>
-                  <option value={60}>60 seconds</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-800/60">
-              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoResume}
-                  onChange={(e) => setAutoResume(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0"
-                />
-                Auto-resume last position
-              </label>
-
-              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoplay}
-                  onChange={(e) => setAutoplay(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0"
-                />
-                Autoplay upon opening
-              </label>
-
-              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={pauseOnTabSwitch}
-                  onChange={(e) => setPauseOnTabSwitch(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-0"
-                />
-                Pause video on tab switch
-              </label>
             </div>
           </section>
 
-          {/* Interface Settings */}
-          <section className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-6">
-            <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-              <Layout className="w-4 h-4 text-indigo-400" />
-              Interface Theme & Layout
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Theme</label>
-                <select
-                  value={theme}
-                  onChange={(e) => setTheme(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="dark">Dark Theme (Default & Recommended)</option>
-                  <option value="light">Light Theme</option>
-                  <option value="system">System Preference</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Library Card Density</label>
-                <select
-                  value={layout}
-                  onChange={(e) => setLayout(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="comfortable">Comfortable Grid</option>
-                  <option value="compact">Compact Grid</option>
-                </select>
-              </div>
-            </div>
-          </section>
-
-          {/* Save Button */}
-          <div className="flex justify-end pt-4">
+          {/* Explicit Save Button */}
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-[11px] text-slate-500">
+              Changes are auto-saved instantly upon toggling.
+            </p>
             <button
               type="submit"
               disabled={isSaving}
@@ -456,38 +255,7 @@ export default function SettingsPage() {
           </div>
         </form>
       </main>
-
-      {/* Clear History Confirmation Modal */}
-      {showClearHistoryConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel max-w-sm w-full rounded-2xl p-6 shadow-2xl border border-rose-900/40 text-center">
-            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto mb-4 text-rose-400">
-              <Trash2 className="w-6 h-6" />
-            </div>
-
-            <h3 className="text-base font-bold text-white mb-2">Clear Watch History?</h3>
-            <p className="text-xs text-slate-400 mb-6">
-              This will reset all playback progress, recently watched history, and play counts across your library. Videos will NOT be deleted.
-            </p>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowClearHistoryConfirm(false)}
-                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-xl transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleClearHistory}
-                disabled={isClearingHistory}
-                className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-lg shadow-rose-600/20 transition-all"
-              >
-                {isClearingHistory ? 'Clearing...' : 'Clear History'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+
