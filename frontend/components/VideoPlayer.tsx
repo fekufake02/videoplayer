@@ -166,7 +166,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
-  // Auto-hide Controls after exactly 1 second (1000ms) of inactivity
+  // Auto-hide Controls after exactly 2.5 seconds (2500ms) of inactivity
   const resetControlsTimeout = useCallback(() => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
@@ -175,7 +175,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         setShowControls(false);
         setShowSpeedMenu(false);
       }
-    }, 1000); // 1 second timeout
+    }, 2500); // 2.5 seconds timeout
   }, [isPlaying]);
 
   // Play / Pause Toggle
@@ -458,7 +458,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     const timeDiff = now - lastTapRef.current.time;
     const distDiff = Math.abs(clientX - lastTapRef.current.x);
 
-    // Double tap within 300ms
+    // Double tap within 320ms
     if (timeDiff < 320 && distDiff < 60) {
       if (relativeX < width * 0.35) {
         skip(-10);
@@ -698,15 +698,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
       {/* Zoom Badge Indicator with 1-Tap Reset */}
       {zoomScale > 1.05 && (
-        <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-30 flex items-center gap-1.5 bg-black/85 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-400/40 text-amber-400 text-xs font-mono font-bold shadow-2xl">
-          <ZoomIn className="w-3.5 h-3.5" />
+        <div className="absolute top-2.5 right-2.5 sm:top-4 sm:right-4 z-30 flex items-center gap-1.5 bg-black/85 backdrop-blur-md px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-amber-400/40 text-amber-400 text-[10px] sm:text-xs font-mono font-bold shadow-2xl">
+          <ZoomIn className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
           <span>{Math.round(zoomScale * 100)}%</span>
           <button
             onClick={(e) => {
               e.stopPropagation();
               resetZoom();
             }}
-            className="ml-1 bg-zinc-800 hover:bg-zinc-700 text-white text-[10px] px-1.5 py-0.5 rounded-full transition-colors font-sans"
+            className="ml-1 bg-zinc-800 hover:bg-zinc-700 text-white text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-full transition-colors font-sans"
             title="Reset Zoom (0)"
           >
             Reset
@@ -716,33 +716,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
       {/* Double Tap Seek Feedback Ripple Animations */}
       {seekFeedback && (
-        <div className="absolute inset-0 z-25 pointer-events-none flex items-center justify-between px-8 sm:px-16">
+        <div className="absolute inset-0 z-25 pointer-events-none flex items-center justify-between px-6 sm:px-16">
           {seekFeedback.direction === 'left' && (
-            <div className="flex flex-col items-center gap-1 bg-black/70 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
-              <RotateCcw className="w-7 h-7 animate-spin-once" />
-              <span className="text-xs font-extrabold font-mono tracking-wide">-10s</span>
+            <div className="flex flex-col items-center gap-0.5 sm:gap-1 bg-black/75 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
+              <RotateCcw className="w-5 h-5 sm:w-7 sm:h-7 animate-spin-once" />
+              <span className="text-[10px] sm:text-xs font-extrabold font-mono tracking-wide">-10s</span>
             </div>
           )}
           <div className="flex-1" />
           {seekFeedback.direction === 'right' && (
-            <div className="flex flex-col items-center gap-1 bg-black/70 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
-              <RotateCw className="w-7 h-7 animate-spin-once" />
-              <span className="text-xs font-extrabold font-mono tracking-wide">+10s</span>
+            <div className="flex flex-col items-center gap-0.5 sm:gap-1 bg-black/75 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
+              <RotateCw className="w-5 h-5 sm:w-7 sm:h-7 animate-spin-once" />
+              <span className="text-[10px] sm:text-xs font-extrabold font-mono tracking-wide">+10s</span>
             </div>
           )}
         </div>
       )}
 
-      {/* Center Loading Spinner */}
+      {/* Center Loading Spinner (Buffering State - Clean without any overlay controls) */}
       {isWaiting && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 border-4 border-white/20 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
+          <div className="w-10 h-10 sm:w-16 sm:h-16 border-3 sm:border-4 border-white/20 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
         </div>
       )}
 
       {/* Minimal 2-Second Auto-Dismiss Resume Prompt */}
-      {showResumePrompt && (
-        <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-30 flex items-center gap-2 bg-zinc-950/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-amber-400/40 shadow-2xl animate-fade-in text-xs select-none">
+      {showResumePrompt && !isWaiting && (
+        <div className="absolute top-2.5 left-2.5 sm:top-4 sm:left-4 z-30 flex items-center gap-1.5 sm:gap-2 bg-zinc-950/90 backdrop-blur-md px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full border border-amber-400/40 shadow-2xl animate-fade-in text-[11px] sm:text-xs select-none">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -753,10 +753,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             }}
             className="flex items-center gap-1.5 font-bold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+            <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400 animate-pulse shrink-0" />
             <span>Resume at <span className="font-mono text-white underline">{resumePositionFormatted}</span></span>
           </button>
-          <div className="w-[1px] h-3 bg-white/20" />
+          <div className="w-[1px] h-2.5 sm:h-3 bg-white/20" />
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -765,12 +765,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             className="text-zinc-400 hover:text-white p-0.5 rounded-full hover:bg-zinc-800 transition-colors cursor-pointer"
             title="Dismiss"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Center Clean Play Button (Shown cleanly when paused) */}
+      {/* Clean Single Play Button when Paused (Hidden while buffering) */}
       {!isPlaying && !isWaiting && (
         <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
           <button
@@ -779,35 +779,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
               togglePlay();
             }}
             title="Play (Space)"
-            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 hover:bg-amber-300 transition-all pointer-events-auto cursor-pointer"
+            className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 hover:bg-amber-300 transition-all pointer-events-auto cursor-pointer"
           >
-            <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
+            <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
           </button>
         </div>
       )}
 
-      {/* Controls Overlay (Fades out automatically after 1 second) */}
+      {/* Controls Overlay (Hidden during buffering, auto-fades out after 2.5s) */}
       <div
-        className={`absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/75 transition-opacity duration-200 flex flex-col justify-between p-3 sm:p-4 z-20 pointer-events-none ${
-          showControls ? 'opacity-100' : 'opacity-0'
+        className={`absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/75 transition-opacity duration-200 flex flex-col justify-between p-2 sm:p-4 z-20 ${
+          showControls && !isWaiting ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
       >
-        {/* Top Header Row */}
-        <div className="flex items-center justify-between pointer-events-auto gap-2">
+        {/* Top Header Row (Compact & refined for mobile) */}
+        <div className="flex items-center justify-between gap-1.5 sm:gap-2">
           <Link
             href="/"
             onClick={(e) => e.stopPropagation()}
-            className="px-2.5 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 flex items-center gap-1 text-xs font-semibold backdrop-blur-md active:scale-95 shadow-md shrink-0"
+            className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg sm:rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 flex items-center gap-1 text-[11px] sm:text-xs font-semibold backdrop-blur-md active:scale-95 shadow-md shrink-0"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
+            <ArrowLeft className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             <span className="hidden sm:inline">Library</span>
           </Link>
 
-          <h3 className="font-semibold text-xs sm:text-sm text-white line-clamp-1 max-w-[180px] sm:max-w-md text-center px-1">
+          <h3 className="font-semibold text-[11px] sm:text-sm text-white line-clamp-1 max-w-[150px] sm:max-w-md text-center px-1">
             {video.title}
           </h3>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* Landscape / Portrait Orientation Freedom Toggle */}
             <button
               onClick={(e) => {
@@ -815,36 +815,36 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 toggleOrientation();
               }}
               title={isLandscapeForced ? 'Switch to Portrait' : 'Switch to Landscape (L)'}
-              className={`px-2 py-1.5 rounded-xl border backdrop-blur-md flex items-center gap-1 text-xs font-semibold active:scale-95 transition-all shadow-md ${
+              className={`px-1.5 py-1 sm:px-2 sm:py-1.5 rounded-lg sm:rounded-xl border backdrop-blur-md flex items-center gap-1 text-[10px] sm:text-xs font-semibold active:scale-95 transition-all shadow-md ${
                 isLandscapeForced
                   ? 'bg-amber-400 text-black border-amber-400 font-extrabold'
                   : 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border-zinc-800'
               }`}
             >
-              <Rotate3d className="w-3.5 h-3.5" />
-              <span className="text-[11px] hidden sm:inline">{isLandscapeForced ? 'Landscape' : 'Rotate'}</span>
+              <Rotate3d className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="text-[10px] sm:text-[11px] hidden sm:inline">{isLandscapeForced ? 'Landscape' : 'Rotate'}</span>
             </button>
 
-            {/* Privacy Mode */}
+            {/* Privacy Mode (Desktop / Tablet) */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 handleTogglePrivacy();
               }}
               title="Privacy Mode (P)"
-              className="w-8 h-8 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md hidden sm:flex"
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md hidden sm:flex"
             >
               <EyeOff className="w-3.5 h-3.5" />
             </button>
 
-            {/* Panic Lock */}
+            {/* Panic Lock (Desktop / Tablet) */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 handleLockApp();
               }}
               title="Panic Lock"
-              className="w-8 h-8 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md hidden sm:flex"
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md hidden sm:flex"
             >
               <Lock className="w-3.5 h-3.5" />
             </button>
@@ -856,14 +856,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 toggleFullscreen();
               }}
               title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-              className="w-8 h-8 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md"
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md"
             >
-              {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+              {isFullscreen ? <Minimize className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> : <Maximize className="w-3 h-3 sm:w-3.5 sm:h-3.5" />}
             </button>
           </div>
         </div>
 
-        {/* Center Pause/Play Action (Only visible when controls are active during play) */}
+        {/* Center Pause Action (Only visible when controls are active during playback) */}
         {isPlaying && (
           <div className="self-center pointer-events-auto">
             <button
@@ -872,21 +872,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 togglePlay();
               }}
               title="Pause (Space)"
-              className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 hover:bg-amber-300 transition-all backdrop-blur-md cursor-pointer"
+              className="w-11 h-11 sm:w-16 sm:h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 hover:bg-amber-300 transition-all backdrop-blur-md cursor-pointer"
             >
-              <Pause className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
+              <Pause className="w-5 h-5 sm:w-7 sm:h-7 fill-current" />
             </button>
           </div>
         )}
 
-        {/* Bottom Timeline & Controls Bar */}
+        {/* Bottom Timeline & Clean Compact Controls Bar */}
         <div
-          className="space-y-1.5 sm:space-y-2 pointer-events-auto bg-zinc-950/70 sm:bg-transparent p-2 sm:p-0 rounded-xl backdrop-blur-sm sm:backdrop-blur-none"
+          className="space-y-1 sm:space-y-2 pointer-events-auto bg-zinc-950/80 sm:bg-transparent p-1.5 sm:p-0 rounded-lg sm:rounded-xl backdrop-blur-md sm:backdrop-blur-none"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Scrubber Bar */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            <span className="font-mono text-[11px] sm:text-xs text-slate-300 min-w-[34px] sm:min-w-[40px] text-right font-medium">
+          <div className="flex items-center gap-1.5 sm:gap-3">
+            <span className="font-mono text-[10px] sm:text-xs text-slate-300 min-w-[28px] sm:min-w-[40px] text-right font-medium">
               {formatTime(currentTime)}
             </span>
             <div className="flex-1">
@@ -900,7 +900,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 maxBufferAhead={120}
               />
             </div>
-            <span className="font-mono text-[11px] sm:text-xs text-slate-400 min-w-[34px] sm:min-w-[40px] font-medium">
+            <span className="font-mono text-[10px] sm:text-xs text-slate-400 min-w-[28px] sm:min-w-[40px] font-medium">
               {formatTime(duration)}
             </span>
           </div>
@@ -908,42 +908,42 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           {/* Action Buttons Row */}
           <div className="flex items-center justify-between gap-1 sm:gap-3">
             {/* Left Controls */}
-            <div className="flex items-center gap-1 sm:gap-2">
+            <div className="flex items-center gap-0.5 sm:gap-2">
               <button
                 onClick={togglePlay}
-                className="w-8 h-8 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-slate-200 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-200 hover:text-white hover:bg-zinc-800/60 active:scale-95"
                 title={isPlaying ? 'Pause' : 'Play'}
               >
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {isPlaying ? <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
               </button>
 
               <button
                 onClick={() => skip(-10)}
                 title="Rewind 10s"
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               </button>
 
               <button
                 onClick={() => skip(10)}
                 title="Forward 10s"
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
               >
-                <RotateCw className="w-3.5 h-3.5" />
+                <RotateCw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               </button>
 
               {/* Volume / Mute Button & Slider */}
               <div className="flex items-center gap-1">
                 <button
                   onClick={toggleMute}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
                   title="Mute / Unmute"
                 >
                   {isMuted || volume === 0 ? (
-                    <VolumeX className="w-4 h-4 text-rose-400" />
+                    <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-400" />
                   ) : (
-                    <Volume2 className="w-4 h-4" />
+                    <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   )}
                 </button>
                 <input
@@ -962,25 +962,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             {/* Right Controls */}
             <div className="flex items-center gap-1 sm:gap-2 relative">
               {/* Zoom Buttons (+ / - / Reset) */}
-              <div className="flex items-center bg-zinc-900/90 border border-zinc-700/70 rounded-lg px-1 py-0.5 text-xs text-zinc-300">
+              <div className="flex items-center bg-zinc-900/90 border border-zinc-700/70 rounded-md sm:rounded-lg px-1 py-0.5 text-[10px] sm:text-xs text-zinc-300">
                 <button
                   onClick={() => setClampedZoom(zoomScale - 0.25)}
                   disabled={zoomScale <= 1.0}
-                  className="p-1 hover:text-amber-400 disabled:opacity-30 active:scale-95"
+                  className="p-0.5 sm:p-1 hover:text-amber-400 disabled:opacity-30 active:scale-95"
                   title="Zoom Out (-)"
                 >
-                  <ZoomOut className="w-3.5 h-3.5" />
+                  <ZoomOut className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 </button>
-                <span className="font-mono text-[10px] font-bold px-1 text-amber-300 min-w-[28px] text-center">
+                <span className="font-mono text-[9px] sm:text-[10px] font-bold px-0.5 sm:px-1 text-amber-300 min-w-[24px] sm:min-w-[28px] text-center">
                   {Math.round(zoomScale * 100)}%
                 </span>
                 <button
                   onClick={() => setClampedZoom(zoomScale + 0.25)}
                   disabled={zoomScale >= 4.0}
-                  className="p-1 hover:text-amber-400 disabled:opacity-30 active:scale-95"
+                  className="p-0.5 sm:p-1 hover:text-amber-400 disabled:opacity-30 active:scale-95"
                   title="Zoom In (+)"
                 >
-                  <ZoomIn className="w-3.5 h-3.5" />
+                  <ZoomIn className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 </button>
               </div>
 
@@ -988,10 +988,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
               <div className="relative">
                 <button
                   onClick={() => setShowSpeedMenu((prev) => !prev)}
-                  className="px-2 py-1 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-200 text-xs font-mono font-bold flex items-center gap-1 active:scale-95"
+                  className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-md sm:rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-200 text-[10px] sm:text-xs font-mono font-bold flex items-center gap-1 active:scale-95"
                   title="Playback Speed"
                 >
-                  <Gauge className="w-3 h-3 text-amber-400" />
+                  <Gauge className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-400" />
                   <span>{playbackSpeed.toFixed(1)}x</span>
                 </button>
 
@@ -1021,7 +1021,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
               <button
                 onClick={togglePictureInPicture}
                 title="Picture in Picture"
-                className="w-8 h-8 rounded-lg hidden sm:flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hidden sm:flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
               >
                 <PictureInPicture className="w-3.5 h-3.5" />
               </button>
