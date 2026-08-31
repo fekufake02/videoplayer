@@ -153,7 +153,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   // Handle Video Metadata Loaded
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      setDuration(videoRef.current.duration);
+      if (videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
+        setDuration(videoRef.current.duration);
+      }
       videoRef.current.volume = isMuted ? 0 : volume;
       videoRef.current.playbackRate = playbackSpeed;
 
@@ -161,8 +163,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         videoRef.current.currentTime = video.lastPosition;
       }
       setIsMediaReady(true);
+      setIsWaiting(false);
     }
   };
+
+  useEffect(() => {
+    if (video.duration && video.duration > 0) {
+      setDuration(video.duration);
+    }
+  }, [video.duration]);
 
   const handleMediaReady = () => {
     setIsMediaReady(true);
@@ -710,6 +719,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           crossOrigin="anonymous"
           preload="auto"
           onLoadedMetadata={handleLoadedMetadata}
+          onDurationChange={() => {
+            if (videoRef.current && videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
+              setDuration(videoRef.current.duration);
+            }
+          }}
           onTimeUpdate={handleTimeUpdate}
           onWaiting={() => setIsWaiting(true)}
           onSeeking={() => setIsWaiting(true)}

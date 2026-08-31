@@ -143,6 +143,54 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   /**
+   * Helper to accurately detect video duration from file metadata in browser
+   */
+  const extractVideoDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      try {
+        const url = URL.createObjectURL(file);
+        const tempVideo = document.createElement('video');
+        tempVideo.preload = 'metadata';
+        let isResolved = false;
+
+        const cleanup = () => {
+          if (isResolved) return;
+          isResolved = true;
+          tempVideo.removeAttribute('src');
+          tempVideo.load();
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+        };
+
+        tempVideo.onloadedmetadata = () => {
+          const d = tempVideo.duration;
+          cleanup();
+          if (d && !isNaN(d) && isFinite(d) && d > 0) {
+            resolve(Math.round(d));
+          } else {
+            resolve(0);
+          }
+        };
+
+        tempVideo.onerror = () => {
+          cleanup();
+          resolve(0);
+        };
+
+        setTimeout(() => {
+          cleanup();
+          resolve(0);
+        }, 5000);
+
+        tempVideo.src = url;
+      } catch {
+        resolve(0);
+      }
+    });
+  };
+
+  /**
    * Uploads a single chunk of the file with byte range
    */
   const uploadChunk = async (
@@ -315,6 +363,13 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
+      // Extract video duration from metadata if available
+      let detectedDuration: number | undefined;
+      try {
+        const d = await extractVideoDuration(task.file);
+        if (d > 0) detectedDuration = d;
+      } catch {}
+
       await api.completeUpload({
         title: task.title.trim() || task.file.name,
         originalFilename: task.file.name,
@@ -323,6 +378,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         blurhash,
         mimeType: task.file.type || 'video/mp4',
         size: task.file.size,
+        duration: detectedDuration,
       });
 
       // Mark complete
