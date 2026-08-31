@@ -199,39 +199,59 @@ export default function WatchPage() {
         </div>
 
         {loadingMedia ? (
-          <div className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden border border-zinc-800/80 shadow-2xl flex flex-col items-center justify-center select-none">
-            {/* Top Bar Shell */}
-            <div className="absolute top-0 left-0 right-0 p-2 sm:p-4 flex items-center justify-between pointer-events-none opacity-60">
-              <div className="h-6 w-16 bg-zinc-900 rounded-lg border border-zinc-800" />
-              <div className="h-4 w-32 bg-zinc-900 rounded-md border border-zinc-800" />
-              <div className="flex gap-1.5">
-                <div className="h-6 w-6 bg-zinc-900 rounded-lg border border-zinc-800" />
-                <div className="h-6 w-6 bg-zinc-900 rounded-lg border border-zinc-800" />
+          <>
+            <div className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden border border-zinc-800/80 shadow-2xl flex flex-col items-center justify-center select-none">
+              {/* Top Bar Shell */}
+              <div className="absolute top-0 left-0 right-0 p-2 sm:p-4 flex items-center justify-between pointer-events-none opacity-60">
+                <div className="h-6 w-16 bg-zinc-900 rounded-lg border border-zinc-800" />
+                <div className="h-4 w-32 bg-zinc-900 rounded-md border border-zinc-800" />
+                <div className="flex gap-1.5">
+                  <div className="h-6 w-6 bg-zinc-900 rounded-lg border border-zinc-800" />
+                  <div className="h-6 w-6 bg-zinc-900 rounded-lg border border-zinc-800" />
+                </div>
+              </div>
+
+              {/* Center Golden Spinner */}
+              <div className="flex flex-col items-center gap-3 z-10">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 border-3 sm:border-4 border-zinc-800 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
+                <span className="text-[11px] sm:text-xs font-mono text-amber-400/90 font-semibold tracking-wide bg-zinc-950/80 px-3 py-1 rounded-full border border-amber-400/20">
+                  Loading stream...
+                </span>
+              </div>
+
+              {/* Bottom Timeline Shell */}
+              <div className="absolute bottom-0 left-0 right-0 p-2 sm:p-4 space-y-2 pointer-events-none opacity-50">
+                <div className="h-1.5 w-full bg-zinc-800 rounded-full" />
+                <div className="flex justify-between items-center">
+                  <div className="flex gap-2">
+                    <div className="h-5 w-5 bg-zinc-800 rounded-md" />
+                    <div className="h-5 w-5 bg-zinc-800 rounded-md" />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="h-5 w-10 bg-zinc-800 rounded-md" />
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Center Golden Spinner */}
-            <div className="flex flex-col items-center gap-3 z-10">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 border-3 sm:border-4 border-zinc-800 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
-              <span className="text-[11px] sm:text-xs font-mono text-amber-400/90 font-semibold tracking-wide bg-zinc-950/80 px-3 py-1 rounded-full border border-amber-400/20">
-                Loading stream...
-              </span>
-            </div>
-
-            {/* Bottom Timeline Shell */}
-            <div className="absolute bottom-0 left-0 right-0 p-2 sm:p-4 space-y-2 pointer-events-none opacity-50">
-              <div className="h-1.5 w-full bg-zinc-800 rounded-full" />
-              <div className="flex justify-between items-center">
-                <div className="flex gap-2">
-                  <div className="h-5 w-5 bg-zinc-800 rounded-md" />
-                  <div className="h-5 w-5 bg-zinc-800 rounded-md" />
+            {/* Video Details Skeleton Shell */}
+            <div className="glass-panel p-4 sm:p-6 rounded-xl sm:rounded-2xl space-y-4 sm:space-y-6 border border-slate-800/80 animate-pulse">
+              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-4 sm:pb-6 border-b border-slate-800/80">
+                <div className="space-y-2.5">
+                  <div className="h-6 w-64 bg-zinc-800 rounded-md" />
+                  <div className="flex items-center gap-4">
+                    <div className="h-4 w-24 bg-zinc-800/60 rounded" />
+                    <div className="h-4 w-20 bg-zinc-800/60 rounded" />
+                    <div className="h-4 w-16 bg-zinc-800/60 rounded" />
+                  </div>
                 </div>
                 <div className="flex gap-2">
-                  <div className="h-5 w-10 bg-zinc-800 rounded-md" />
+                  <div className="h-9 w-24 bg-zinc-800 rounded-xl" />
+                  <div className="h-9 w-28 bg-zinc-800 rounded-xl" />
                 </div>
               </div>
             </div>
-          </div>
+          </>
         ) : error ? (
           <div className="glass-panel p-8 sm:p-12 rounded-xl sm:rounded-2xl text-center flex flex-col items-center justify-center border border-rose-900/40">
             <AlertCircle className="w-10 h-10 text-rose-400 mb-3" />

@@ -352,9 +352,16 @@ export const getVideoDetails = async (req: AuthenticatedRequest, res: Response):
       return;
     }
 
+    const obj = video.toObject();
+    if (video.thumbnailKey) {
+      try {
+        (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600);
+      } catch (e) {}
+    }
+
     res.status(200).json({
       success: true,
-      video,
+      video: obj,
     });
   } catch (error) {
     res.status(500).json({

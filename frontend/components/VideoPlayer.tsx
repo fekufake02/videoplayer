@@ -41,8 +41,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const { settings, isPrivacyActive, isLocked, togglePrivacyMode, lockApp } = useAuth();
   const bufferingState = useBufferedSegments(videoRef);
 
+  const resolvedThumbnail =
+    video.thumbnailUrl ||
+    (video.thumbnailKey
+      ? `/api/upload-receiver?key=${encodeURIComponent(video.thumbnailKey)}`
+      : undefined);
+
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isWaiting, setIsWaiting] = useState(false);
+  const [isMediaReady, setIsMediaReady] = useState(false);
+  const [isWaiting, setIsWaiting] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(video.duration || 0);
   const [volume, setVolume] = useState(settings?.defaultVolume ?? 1);
@@ -153,7 +160,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       if (settings?.autoResume && video.lastPosition && !showResumePrompt) {
         videoRef.current.currentTime = video.lastPosition;
       }
+      setIsMediaReady(true);
     }
+  };
+
+  const handleMediaReady = () => {
+    setIsMediaReady(true);
+    setIsWaiting(false);
   };
 
   // Always pause playback immediately on tab switch or window minimize
@@ -681,9 +694,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           cursor: zoomScale > 1.05 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default',
         }}
       >
+        {/* Instant Poster/Thumbnail Backdrop (Eliminates black screen void before first frame) */}
+        {resolvedThumbnail && !isPlaying && (
+          <img
+            src={resolvedThumbnail}
+            alt={video.title}
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none z-0"
+          />
+        )}
+
         <video
           ref={videoRef}
           src={streamUrl}
+          poster={resolvedThumbnail}
           crossOrigin="anonymous"
           preload="auto"
           onLoadedMetadata={handleLoadedMetadata}
@@ -691,11 +714,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           onWaiting={() => setIsWaiting(true)}
           onSeeking={() => setIsWaiting(true)}
           onLoadStart={() => setIsWaiting(true)}
-          onLoadedData={() => setIsWaiting(false)}
-          onCanPlay={() => setIsWaiting(false)}
-          onCanPlayThrough={() => setIsWaiting(false)}
+          onLoadedData={handleMediaReady}
+          onCanPlay={handleMediaReady}
+          onCanPlayThrough={handleMediaReady}
           onPlaying={() => {
-            setIsWaiting(false);
+            handleMediaReady();
             setIsPlaying(true);
             resetControlsTimeout();
           }}
@@ -710,8 +733,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             setIsWaiting(false);
             if (videoRef.current) saveProgress(videoRef.current.duration);
           }}
-          onError={() => setIsWaiting(false)}
-          className="w-full h-full object-contain pointer-events-none"
+          onError={() => {
+            setIsWaiting(false);
+            setIsMediaReady(true);
+          }}
+          className="relative z-1 w-full h-full object-contain pointer-events-none"
           playsInline
         />
       </div>
@@ -759,15 +785,39 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         </div>
       )}
 
-      {/* Center Buffering Spinner (Clean & prominent) */}
-      {isWaiting && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-35">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 border-3 sm:border-4 border-zinc-700/60 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
+      {/* Center Buffering Spinner or Central Play / Pause Button */}
+      {(!isMediaReady || isWaiting) ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-30">
+          <div className="flex flex-col items-center gap-2.5 bg-black/60 backdrop-blur-md px-5 py-4 rounded-2xl border border-white/10 shadow-2xl animate-fade-in">
+            <div className="w-10 h-10 sm:w-14 sm:h-14 border-3 sm:border-4 border-zinc-700/60 border-t-amber-400 rounded-full animate-spin shadow-xl" />
+            <span className="text-[11px] sm:text-xs font-mono text-amber-300 font-semibold tracking-wide">
+              {isMediaReady ? 'Buffering...' : 'Loading stream...'}
+            </span>
+          </div>
         </div>
+      ) : (
+        (!isPlaying || showControls) && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-fade-in">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePlay();
+              }}
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+              className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-amber-400 hover:bg-amber-300 text-black flex items-center justify-center shadow-[0_0_30px_rgba(251,191,36,0.35)] hover:scale-105 active:scale-95 transition-all pointer-events-auto cursor-pointer border-2 border-amber-300/60"
+            >
+              {isPlaying ? (
+                <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
+              ) : (
+                <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
+              )}
+            </button>
+          </div>
+        )
       )}
 
       {/* Minimal 2-Second Auto-Dismiss Resume Prompt */}
-      {showResumePrompt && !isWaiting && (
+      {showResumePrompt && !isWaiting && isMediaReady && (
         <div className="absolute top-2.5 left-2.5 sm:top-4 sm:left-4 z-40 flex items-center gap-1.5 sm:gap-2 bg-zinc-950/90 backdrop-blur-md px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-full border border-amber-400/40 shadow-2xl animate-fade-in text-[11px] sm:text-xs select-none">
           <button
             onClick={(e) => {
@@ -798,30 +848,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         </div>
       )}
 
-      {/* Prominent High-Visibility Central Play / Pause Button */}
-      {!isWaiting && (!isPlaying || showControls) && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePlay();
-            }}
-            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-            className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-amber-400 hover:bg-amber-300 text-black flex items-center justify-center shadow-[0_0_30px_rgba(251,191,36,0.35)] hover:scale-105 active:scale-95 transition-all pointer-events-auto cursor-pointer border-2 border-amber-300/60"
-          >
-            {isPlaying ? (
-              <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
-            ) : (
-              <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* Controls Overlay (Hidden during buffering, auto-fades out after 2.5s) */}
+      {/* Controls Overlay (Visible during load & paused, auto-fades out during playback) */}
       <div
         className={`absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-black/75 transition-opacity duration-200 flex flex-col justify-between p-2 sm:p-4 z-20 pointer-events-none ${
-          showControls && !isWaiting ? 'opacity-100' : 'opacity-0'
+          showControls || !isPlaying || !isMediaReady ? 'opacity-100' : 'opacity-0'
         }`}
       >
         {/* Top Header Row (Compact & refined for mobile) */}
