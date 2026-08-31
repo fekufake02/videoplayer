@@ -427,10 +427,7 @@ export async function GET(
     const filter = searchParams.get('filter') || 'all';
 
     let filtered = Array.from(globalVideos.values()).map((v) => {
-      // Auto-repair any unassigned or 0-duration videos
-      if (!v.duration || v.duration <= 0 || isNaN(v.duration)) {
-        v.duration = 180;
-      }
+      repairVideoItem(v);
       return v;
     });
 
@@ -507,11 +504,11 @@ export async function GET(
       );
     }
 
-    if (!video.duration || video.duration <= 0) {
-      video.duration = 180;
-    }
+    repairVideoItem(video);
 
-    const streamUrl = video.streamUrl || `/api/videos/${videoId}/raw`;
+    const hasLocal = uploadedBlobs.has(video.storageKey) || !!readDiskMedia(video.storageKey);
+    const streamUrl = hasLocal ? `/api/videos/${videoId}/raw` : (video.streamUrl || `/api/videos/${videoId}/raw`);
+
     return NextResponse.json({
       success: true,
       streamUrl,
@@ -715,6 +712,7 @@ export async function GET(
         { status: 404 }
       );
     }
+    repairVideoItem(video);
     return NextResponse.json({
       success: true,
       video,

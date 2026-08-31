@@ -65,7 +65,8 @@ export default function WatchPage() {
 
       if (detailsRes.success && streamRes.success) {
         setVideo(detailsRes.video);
-        setStreamUrl(streamRes.streamUrl);
+        const resolvedStream = streamRes.streamUrl || detailsRes.video.streamUrl || `/api/videos/${id}/raw`;
+        setStreamUrl(resolvedStream);
       }
     } catch (err: any) {
       console.error('Failed to load video media:', err);

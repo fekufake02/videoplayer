@@ -716,7 +716,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           ref={videoRef}
           src={streamUrl}
           poster={resolvedThumbnail}
-          crossOrigin="anonymous"
           preload="auto"
           onLoadedMetadata={handleLoadedMetadata}
           onDurationChange={() => {

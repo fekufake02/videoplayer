@@ -6,6 +6,7 @@ export interface IVideo {
   thumbnailKey?: string;
   thumbnailUrl?: string;
   blurhash?: string;
+  streamUrl?: string;
   mimeType: string;
   size: number;
   duration: number;
