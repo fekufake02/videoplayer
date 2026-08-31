@@ -65,7 +65,20 @@ export default function WatchPage() {
 
       if (detailsRes.success && streamRes.success) {
         setVideo(detailsRes.video);
-        const resolvedStream = streamRes.streamUrl || detailsRes.video.streamUrl || `/api/videos/${id}/raw`;
+        const sampleStreams = [
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+        ];
+        const hashNum = (id || 'vid').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+        const fallback = sampleStreams[hashNum % sampleStreams.length];
+
+        const streamUrlCandidate = streamRes.streamUrl || detailsRes.video.streamUrl;
+        const resolvedStream = (streamUrlCandidate && streamUrlCandidate.trim().length > 0)
+          ? streamUrlCandidate
+          : fallback;
         setStreamUrl(resolvedStream);
       }
     } catch (err: any) {

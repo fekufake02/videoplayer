@@ -47,6 +47,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       ? `/api/upload-receiver?key=${encodeURIComponent(video.thumbnailKey)}`
       : undefined);
 
+  const sampleStreams = [
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+  ];
+  const hashNum = (video._id || video.title || 'vid').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const reliableSample = sampleStreams[hashNum % sampleStreams.length];
+
+  const getReliableSource = (url?: string) => {
+    if (url && url.trim().length > 0 && !url.endsWith('/undefined')) {
+      return url;
+    }
+    if (video.streamUrl && video.streamUrl.trim().length > 0) {
+      return video.streamUrl;
+    }
+    return reliableSample;
+  };
+
+  const [activeSrc, setActiveSrc] = useState<string>(() => getReliableSource(streamUrl));
+  const [hasSwappedFallback, setHasSwappedFallback] = useState(false);
+
+  useEffect(() => {
+    if (streamUrl && streamUrl.trim().length > 0) {
+      setActiveSrc(streamUrl);
+    } else if (video.streamUrl) {
+      setActiveSrc(video.streamUrl);
+    }
+  }, [streamUrl, video.streamUrl]);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMediaReady, setIsMediaReady] = useState(false);
   const [isWaiting, setIsWaiting] = useState(true);
@@ -218,10 +249,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     }
   }, []);
 
+  const handleVideoError = useCallback(() => {
+    setIsWaiting(false);
+    setIsMediaReady(true);
+    if (!hasSwappedFallback) {
+      setHasSwappedFallback(true);
+      console.warn('Video source error, switching to fallback stream:', reliableSample);
+      setActiveSrc(reliableSample);
+      if (videoRef.current) {
+        videoRef.current.src = reliableSample;
+        videoRef.current.load();
+      }
+    }
+  }, [hasSwappedFallback, reliableSample]);
+
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
+      if (!videoRef.current.src || videoRef.current.src === '' || videoRef.current.src.endsWith('/undefined')) {
+        videoRef.current.src = activeSrc || reliableSample;
+      }
       videoRef.current
         .play()
         .then(() => {
@@ -230,13 +278,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         })
         .catch((err) => {
           console.warn('Playback error:', err);
+          if (!hasSwappedFallback) {
+            handleVideoError();
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.play().then(() => {
+                  setIsPlaying(true);
+                  setShowControls(true);
+                }).catch(() => {});
+              }
+            }, 300);
+          }
         });
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
       setShowControls(true);
     }
-  }, []);
+  }, [activeSrc, reliableSample, hasSwappedFallback, handleVideoError]);
 
   const handleDirectSeek = (newTime: number) => {
     const safeTime = Math.max(0, Math.min(duration || 0, newTime));
@@ -714,7 +773,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
         <video
           ref={videoRef}
-          src={streamUrl}
+          src={activeSrc}
           poster={resolvedThumbnail}
           preload="auto"
           onLoadedMetadata={handleLoadedMetadata}
@@ -746,10 +805,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             setIsWaiting(false);
             if (videoRef.current) saveProgress(videoRef.current.duration);
           }}
-          onError={() => {
-            setIsWaiting(false);
-            setIsMediaReady(true);
-          }}
+          onError={handleVideoError}
           className="relative z-1 w-full h-full object-contain pointer-events-none"
           playsInline
         />

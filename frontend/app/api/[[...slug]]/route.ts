@@ -251,8 +251,12 @@ function repairVideoItem(v: IVideoItem) {
 
   // Check if media exists locally on disk or memory
   const hasLocalBlob = uploadedBlobs.has(v.storageKey) || !!readDiskMedia(v.storageKey);
-  if (!hasLocalBlob && !v.streamUrl) {
-    v.streamUrl = sample.url;
+  if (!hasLocalBlob) {
+    if (!v.streamUrl || v.streamUrl.startsWith('/api/')) {
+      v.streamUrl = sample.url;
+    }
+  } else {
+    v.streamUrl = `/api/videos/${v._id}/raw`;
   }
 }
 
@@ -507,7 +511,11 @@ export async function GET(
     repairVideoItem(video);
 
     const hasLocal = uploadedBlobs.has(video.storageKey) || !!readDiskMedia(video.storageKey);
-    const streamUrl = hasLocal ? `/api/videos/${videoId}/raw` : (video.streamUrl || `/api/videos/${videoId}/raw`);
+    const streamUrl = hasLocal
+      ? `/api/videos/${videoId}/raw`
+      : (video.streamUrl && !video.streamUrl.startsWith('/api/')
+          ? video.streamUrl
+          : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
 
     return NextResponse.json({
       success: true,
