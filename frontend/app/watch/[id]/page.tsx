@@ -199,10 +199,37 @@ export default function WatchPage() {
         </div>
 
         {loadingMedia ? (
-          <div className="w-full aspect-video bg-slate-900 rounded-xl sm:rounded-2xl flex items-center justify-center">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-slate-400">Loading private stream...</span>
+          <div className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden border border-zinc-800/80 shadow-2xl flex flex-col items-center justify-center select-none">
+            {/* Top Bar Shell */}
+            <div className="absolute top-0 left-0 right-0 p-2 sm:p-4 flex items-center justify-between pointer-events-none opacity-60">
+              <div className="h-6 w-16 bg-zinc-900 rounded-lg border border-zinc-800" />
+              <div className="h-4 w-32 bg-zinc-900 rounded-md border border-zinc-800" />
+              <div className="flex gap-1.5">
+                <div className="h-6 w-6 bg-zinc-900 rounded-lg border border-zinc-800" />
+                <div className="h-6 w-6 bg-zinc-900 rounded-lg border border-zinc-800" />
+              </div>
+            </div>
+
+            {/* Center Golden Spinner */}
+            <div className="flex flex-col items-center gap-3 z-10">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 border-3 sm:border-4 border-zinc-800 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
+              <span className="text-[11px] sm:text-xs font-mono text-amber-400/90 font-semibold tracking-wide bg-zinc-950/80 px-3 py-1 rounded-full border border-amber-400/20">
+                Loading stream...
+              </span>
+            </div>
+
+            {/* Bottom Timeline Shell */}
+            <div className="absolute bottom-0 left-0 right-0 p-2 sm:p-4 space-y-2 pointer-events-none opacity-50">
+              <div className="h-1.5 w-full bg-zinc-800 rounded-full" />
+              <div className="flex justify-between items-center">
+                <div className="flex gap-2">
+                  <div className="h-5 w-5 bg-zinc-800 rounded-md" />
+                  <div className="h-5 w-5 bg-zinc-800 rounded-md" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="h-5 w-10 bg-zinc-800 rounded-md" />
+                </div>
+              </div>
             </div>
           </div>
         ) : error ? (

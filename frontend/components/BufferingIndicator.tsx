@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { BufferedRange } from '../hooks/useBufferedSegments';
 
 interface BufferingIndicatorProps {
@@ -17,45 +17,56 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
   bufferedRanges,
   currentTime,
   duration,
-  percentBuffered,
-  isBuffering,
+  percentBuffered: _percentBuffered,
+  isBuffering: _isBuffering,
   onSeek,
-  maxBufferAhead = 120, // default 2 minutes bandwidth ceiling
 }) => {
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+
+  const isScrubbingRef = useRef(false);
+  isScrubbingRef.current = isScrubbing;
 
   if (!duration || duration <= 0) return null;
 
-  const playedPercent = Math.min(100, Math.max(0, (currentTime / duration) * 100));
+  // Active display time is scrubTime if user is actively dragging/sliding, otherwise currentTime
+  const displayTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
+  const playedPercent = Math.min(100, Math.max(0, (displayTime / duration) * 100));
 
   const formatTime = (secs: number) => {
-    const hrs = Math.floor(secs / 3600);
-    const mins = Math.floor((secs % 3600) / 60);
-    const s = Math.floor(secs % 60);
+    const safeSecs = Math.max(0, Math.min(duration, secs));
+    const hrs = Math.floor(safeSecs / 3600);
+    const mins = Math.floor((safeSecs % 3600) / 60);
+    const s = Math.floor(safeSecs % 60);
     if (hrs > 0) {
       return `${hrs}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
     return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const getTimeFromX = (clientX: number): number => {
-    if (!progressBarRef.current) return 0;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width));
-    const ratio = clickX / (rect.width || 1);
-    return ratio * duration;
-  };
+  const getTimeFromX = useCallback(
+    (clientX: number): { time: number; pos: number } => {
+      if (!progressBarRef.current) return { time: 0, pos: 0 };
+      const rect = progressBarRef.current.getBoundingClientRect();
+      const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width));
+      const ratio = rect.width > 0 ? clickX / rect.width : 0;
+      return {
+        time: Math.max(0, Math.min(duration, ratio * duration)),
+        pos: clickX,
+      };
+    },
+    [duration]
+  );
 
+  // Desktop Mouse Hover
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!progressBarRef.current) return;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const ratio = x / (rect.width || 1);
-    setHoverPosition(x);
-    setHoverTime(ratio * duration);
+    if (isScrubbing) return;
+    const { time, pos } = getTimeFromX(e.clientX);
+    setHoverPosition(pos);
+    setHoverTime(time);
   };
 
   const handleMouseLeave = () => {
@@ -65,25 +76,30 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     }
   };
 
+  // Desktop Mouse Click & Slide Scrubbing
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsScrubbing(true);
-    const target = getTimeFromX(e.clientX);
-    onSeek(target);
+    const { time, pos } = getTimeFromX(e.clientX);
+    setScrubTime(time);
+    setHoverPosition(pos);
+    setHoverTime(time);
+    onSeek(time);
 
     const onGlobalMouseMove = (moveEvent: MouseEvent) => {
-      const scrubTime = getTimeFromX(moveEvent.clientX);
-      if (progressBarRef.current) {
-        const rect = progressBarRef.current.getBoundingClientRect();
-        const x = Math.max(0, Math.min(moveEvent.clientX - rect.left, rect.width));
-        setHoverPosition(x);
-        setHoverTime(scrubTime);
-      }
-      onSeek(scrubTime);
+      moveEvent.preventDefault();
+      const { time: moveTime, pos: movePos } = getTimeFromX(moveEvent.clientX);
+      setScrubTime(moveTime);
+      setHoverPosition(movePos);
+      setHoverTime(moveTime);
+      onSeek(moveTime);
     };
 
-    const onGlobalMouseUp = () => {
+    const onGlobalMouseUp = (upEvent: MouseEvent) => {
+      const { time: finalTime } = getTimeFromX(upEvent.clientX);
+      onSeek(finalTime);
       setIsScrubbing(false);
+      setScrubTime(null);
       setHoverPosition(null);
       setHoverTime(null);
       window.removeEventListener('mousemove', onGlobalMouseMove);
@@ -94,61 +110,62 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     window.addEventListener('mouseup', onGlobalMouseUp);
   };
 
-  // Mobile Touch Scrubbing Support
+  // Mobile Touch Tap & Sliding Scrubbing
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length === 0) return;
     setIsScrubbing(true);
     const touch = e.touches[0];
-    const target = getTimeFromX(touch.clientX);
-    onSeek(target);
+    const { time, pos } = getTimeFromX(touch.clientX);
+    setScrubTime(time);
+    setHoverPosition(pos);
+    setHoverTime(time);
+    onSeek(time);
 
-    if (progressBarRef.current) {
-      const rect = progressBarRef.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
-      setHoverPosition(x);
-      setHoverTime(target);
-    }
-  };
+    const onGlobalTouchMove = (moveEvent: TouchEvent) => {
+      if (moveEvent.touches.length === 0) return;
+      const t = moveEvent.touches[0];
+      const { time: moveTime, pos: movePos } = getTimeFromX(t.clientX);
+      setScrubTime(moveTime);
+      setHoverPosition(movePos);
+      setHoverTime(moveTime);
+      onSeek(moveTime);
+    };
 
-  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (e.touches.length === 0) return;
-    const touch = e.touches[0];
-    const scrubTime = getTimeFromX(touch.clientX);
-    if (progressBarRef.current) {
-      const rect = progressBarRef.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
-      setHoverPosition(x);
-      setHoverTime(scrubTime);
-    }
-    onSeek(scrubTime);
-  };
-
-  const handleTouchEnd = () => {
-    setIsScrubbing(false);
-    setTimeout(() => {
+    const onGlobalTouchEnd = (endEvent: TouchEvent) => {
+      if (endEvent.changedTouches.length > 0) {
+        const t = endEvent.changedTouches[0];
+        const { time: finalTime } = getTimeFromX(t.clientX);
+        onSeek(finalTime);
+      }
+      setIsScrubbing(false);
+      setScrubTime(null);
       setHoverPosition(null);
       setHoverTime(null);
-    }, 1000);
+      window.removeEventListener('touchmove', onGlobalTouchMove);
+      window.removeEventListener('touchend', onGlobalTouchEnd);
+      window.removeEventListener('touchcancel', onGlobalTouchEnd);
+    };
+
+    window.addEventListener('touchmove', onGlobalTouchMove, { passive: false });
+    window.addEventListener('touchend', onGlobalTouchEnd);
+    window.addEventListener('touchcancel', onGlobalTouchEnd);
   };
 
   return (
     <div
-      className="relative w-full py-3.5 sm:py-2.5 group cursor-pointer select-none touch-none flex items-center"
+      className="relative w-full py-3 sm:py-2 group cursor-pointer select-none touch-none flex items-center"
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={handleTouchEnd}
     >
-      {/* Time hover / touch tooltip */}
+      {/* Time hover / touch scrubber tooltip */}
       {(hoverPosition !== null && hoverTime !== null) && (
         <div
-          className="absolute bottom-full mb-2.5 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-30"
+          className="absolute bottom-full mb-2 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
           style={{ left: `${hoverPosition}px` }}
         >
-          <div className="bg-zinc-900/95 backdrop-blur-md text-amber-400 text-xs font-mono font-bold px-2.5 py-1 rounded-lg border border-white/15 shadow-2xl whitespace-nowrap">
+          <div className="bg-zinc-900/95 backdrop-blur-md text-amber-400 text-[11px] sm:text-xs font-mono font-bold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg border border-amber-400/30 shadow-2xl whitespace-nowrap">
             {formatTime(hoverTime)}
           </div>
         </div>
@@ -158,21 +175,29 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
       <div
         ref={progressBarRef}
         className={`relative w-full rounded-full transition-all overflow-hidden ${
-          isScrubbing ? 'h-2.5 sm:h-2.5 bg-zinc-800' : 'h-1.5 group-hover:h-2.5 bg-zinc-800/90'
+          isScrubbing ? 'h-2 sm:h-2.5 bg-zinc-800' : 'h-1.5 group-hover:h-2.5 bg-zinc-800/90'
         }`}
       >
-        {/* Buffered Segments (Light Gray like YouTube) */}
-        {bufferedRanges.map((range, idx) => {
-          const startPercent = (range.start / duration) * 100;
-          const widthPercent = ((range.end - range.start) / duration) * 100;
+        {/* Base Track */}
+        <div className="absolute inset-0 bg-white/15 rounded-full" />
+
+        {/* Buffered Segments (Accurate loaded buffer ranges in light translucent gray/white) */}
+        {bufferedRanges && bufferedRanges.length > 0 && bufferedRanges.map((range, idx) => {
+          const startPercent = Math.max(0, Math.min(100, (range.start / duration) * 100));
+          const endPercent = Math.max(0, Math.min(100, (range.end / duration) * 100));
+          const widthPercent = Math.max(0, endPercent - startPercent);
+
+          if (widthPercent <= 0) return null;
+
           return (
             <div
               key={idx}
-              className="absolute top-0 bottom-0 bg-zinc-500/70 transition-all rounded-full"
+              className="absolute top-0 bottom-0 bg-white/40 transition-all rounded-full"
               style={{
                 left: `${startPercent}%`,
                 width: `${widthPercent}%`,
               }}
+              title={`Buffered: ${formatTime(range.start)} - ${formatTime(range.end)}`}
             />
           );
         })}
@@ -187,23 +212,22 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
           />
         )}
 
-        {/* Played Progress Bar (Amber) */}
+        {/* Played Progress Bar (High-Contrast Amber) */}
         <div
-          className="absolute top-0 bottom-0 bg-amber-400 rounded-full shadow-lg shadow-amber-400/50"
+          className="absolute top-0 bottom-0 bg-amber-400 rounded-full shadow-[0_0_12px_rgba(251,191,36,0.6)]"
           style={{ width: `${playedPercent}%` }}
         />
       </div>
 
-      {/* Scrubber Thumb Knob (Visible on hover, on mobile, or while scrubbing) */}
+      {/* Scrubber Knob Thumb (Always interactive and visible while sliding or on mobile) */}
       <div
-        className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 sm:w-3.5 sm:h-3.5 bg-amber-400 rounded-full shadow-lg shadow-amber-400/70 border-2 border-zinc-950 transition-opacity pointer-events-none ${
-          isScrubbing ? 'opacity-100 scale-125' : 'opacity-90 sm:opacity-0 group-hover:opacity-100'
+        className={`absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-amber-400 rounded-full shadow-[0_0_10px_rgba(251,191,36,0.8)] border-2 border-zinc-950 transition-transform pointer-events-none z-30 ${
+          isScrubbing ? 'scale-125 opacity-100' : 'opacity-100 sm:opacity-0 group-hover:opacity-100 scale-100 group-hover:scale-110'
         }`}
         style={{
-          left: `calc(${playedPercent}% - 8px)`,
+          left: `calc(${playedPercent}% - ${isScrubbing ? '7px' : '7px'})`,
         }}
       />
     </div>
   );
 };
-

@@ -15,7 +15,7 @@ export interface BufferingState {
 }
 
 export const useBufferedSegments = (
-  videoRef: RefObject<HTMLVideoElement>
+  videoRef: RefObject<HTMLVideoElement | null>
 ): BufferingState => {
   const [bufferingState, setBufferingState] = useState<BufferingState>({
     bufferedRanges: [],
@@ -31,19 +31,27 @@ export const useBufferedSegments = (
     const buffered = video.buffered;
     const duration = video.duration;
 
-    if (!duration || duration === 0) return;
+    if (!duration || isNaN(duration) || duration <= 0) return;
 
     const ranges: BufferedRange[] = [];
     let totalBuffered = 0;
 
-    for (let i = 0; i < buffered.length; i++) {
-      const start = buffered.start(i);
-      const end = buffered.end(i);
-      ranges.push({ start, end });
-      totalBuffered += end - start;
+    if (buffered && buffered.length > 0) {
+      for (let i = 0; i < buffered.length; i++) {
+        try {
+          const start = buffered.start(i);
+          const end = buffered.end(i);
+          if (end >= start) {
+            ranges.push({ start, end });
+            totalBuffered += end - start;
+          }
+        } catch {
+          // Ignore index out of bounds if buffered changed during loop
+        }
+      }
     }
 
-    const percentBuffered = (totalBuffered / duration) * 100;
+    const percentBuffered = duration > 0 ? Math.min(100, (totalBuffered / duration) * 100) : 0;
 
     setBufferingState({
       bufferedRanges: ranges,
@@ -54,21 +62,40 @@ export const useBufferedSegments = (
   }, [videoRef]);
 
   useEffect(() => {
-    if (!videoRef.current) return;
-
     const video = videoRef.current;
-    video.addEventListener('progress', updateBufferedState);
-    video.addEventListener('loadedmetadata', updateBufferedState);
-    video.addEventListener('loadeddata', updateBufferedState);
-    video.addEventListener('timeupdate', updateBufferedState);
-    video.addEventListener('seeked', updateBufferedState);
+    if (!video) return;
+
+    // Listen to all relevant media events
+    const events = [
+      'progress',
+      'loadedmetadata',
+      'loadeddata',
+      'canplay',
+      'canplaythrough',
+      'timeupdate',
+      'seeking',
+      'seeked',
+      'waiting',
+      'playing',
+      'stalled',
+      'suspend',
+    ];
+
+    events.forEach((evt) => {
+      video.addEventListener(evt, updateBufferedState);
+    });
+
+    // Initial update
+    updateBufferedState();
+
+    // Regular interval poll to capture background buffer downloads
+    const interval = setInterval(updateBufferedState, 600);
 
     return () => {
-      video.removeEventListener('progress', updateBufferedState);
-      video.removeEventListener('loadedmetadata', updateBufferedState);
-      video.removeEventListener('loadeddata', updateBufferedState);
-      video.removeEventListener('timeupdate', updateBufferedState);
-      video.removeEventListener('seeked', updateBufferedState);
+      events.forEach((evt) => {
+        video.removeEventListener(evt, updateBufferedState);
+      });
+      clearInterval(interval);
     };
   }, [videoRef, updateBufferedState]);
 
