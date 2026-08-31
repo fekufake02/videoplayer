@@ -14,16 +14,17 @@ import {
   Maximize,
   RotateCcw,
   RotateCw,
-  FastForward,
-  Rewind,
   Minimize,
-  Sliders,
   EyeOff,
   Lock,
   ArrowLeft,
   Sparkles,
   PictureInPicture,
   Gauge,
+  X,
+  ZoomIn,
+  ZoomOut,
+  Rotate3d,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -35,6 +36,7 @@ interface VideoPlayerProps {
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const videoWrapperRef = useRef<HTMLDivElement | null>(null);
 
   const { settings, isPrivacyActive, isLocked, togglePrivacyMode, lockApp } = useAuth();
   const bufferingState = useBufferedSegments(videoRef);
@@ -47,10 +49,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(settings?.defaultPlaybackSpeed ?? 1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isLandscapeForced, setIsLandscapeForced] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [hasRecordedPlay, setHasRecordedPlay] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+
+  // Zoom & Pan State (1.0x to 4.0x / 100% to 400%)
+  const [zoomScale, setZoomScale] = useState(1.0);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const pinchStartRef = useRef<{ dist: number; scale: number; center: { x: number; y: number } } | null>(null);
 
   // Double tap feedback state
   const [seekFeedback, setSeekFeedback] = useState<{
@@ -72,6 +82,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         (document as any).msFullscreenElement
       );
       setIsFullscreen(isFs);
+      if (!isFs) {
+        setIsLandscapeForced(false);
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -114,10 +127,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     lockApp();
   };
 
-  // Resume position initialization
+  // Resume prompt: Minimal banner that auto-vanishes after exactly 2s if untouched
   useEffect(() => {
     if (video.lastPosition && video.lastPosition > 10 && settings?.autoResume !== false) {
       setShowResumePrompt(true);
+      const timer = setTimeout(() => {
+        setShowResumePrompt(false);
+      }, 2000);
+      return () => clearTimeout(timer);
     }
   }, [video.lastPosition, settings]);
 
@@ -149,6 +166,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
+  // Auto-hide Controls after exactly 1 second (1000ms) of inactivity
+  const resetControlsTimeout = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      if (isPlaying) {
+        setShowControls(false);
+        setShowSpeedMenu(false);
+      }
+    }, 1000); // 1 second timeout
+  }, [isPlaying]);
+
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
@@ -159,7 +188,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       setIsPlaying(false);
     }
     resetControlsTimeout();
-  }, []);
+  }, [resetControlsTimeout]);
 
   const handleDirectSeek = (newTime: number) => {
     const safeTime = Math.max(0, Math.min(duration || 0, newTime));
@@ -170,14 +199,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     resetControlsTimeout();
   };
 
-  // Skip Control (-10, +10, -30, +30)
+  // Skip Control (-10, +10)
   const skip = useCallback((seconds: number) => {
     if (!videoRef.current) return;
     const target = Math.max(0, Math.min(duration, videoRef.current.currentTime + seconds));
     videoRef.current.currentTime = target;
     setCurrentTime(target);
     resetControlsTimeout();
-  }, [duration]);
+  }, [duration, resetControlsTimeout]);
 
   // Volume Adjustment
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -200,7 +229,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       setIsMuted(true);
     }
     resetControlsTimeout();
-  }, [isMuted, volume]);
+  }, [isMuted, volume, resetControlsTimeout]);
 
   // Speed Change
   const changePlaybackSpeed = (speed: number) => {
@@ -213,25 +242,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     resetControlsTimeout();
   };
 
-  const cyclePlaybackSpeed = () => {
-    const speeds = [1.0, 1.25, 1.5, 2.0, 0.75];
-    const currentIndex = speeds.findIndex((s) => Math.abs(s - playbackSpeed) < 0.05);
-    const nextSpeed = currentIndex === -1 || currentIndex === speeds.length - 1 ? speeds[0] : speeds[currentIndex + 1];
-    changePlaybackSpeed(nextSpeed);
-  };
-
-  const adjustSpeed = (delta: number) => {
-    setPlaybackSpeed((prev) => {
-      const newSpeed = Math.max(0.25, Math.min(4.0, parseFloat((prev + delta).toFixed(2))));
-      if (videoRef.current) {
-        videoRef.current.playbackRate = newSpeed;
-      }
-      return newSpeed;
-    });
-    resetControlsTimeout();
-  };
-
-  // Fullscreen Toggle with support for mobile safari and Android
+  // Fullscreen Toggle
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
 
@@ -251,6 +262,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         (document as any).msExitFullscreen();
       }
       setIsFullscreen(false);
+      setIsLandscapeForced(false);
     } else {
       const el = containerRef.current as any;
       if (el.requestFullscreen) {
@@ -262,17 +274,217 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       } else if (el.msRequestFullscreen) {
         el.msRequestFullscreen();
       } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
-        // iOS Safari native fullscreen on video element
         (videoRef.current as any).webkitEnterFullscreen();
       }
       setIsFullscreen(true);
     }
   }, []);
 
+  // Landscape / Portrait Freedom Switcher
+  const toggleOrientation = useCallback(async () => {
+    try {
+      if (typeof window !== 'undefined' && 'screen' in window && (screen as any).orientation?.lock) {
+        if (!isLandscapeForced) {
+          await (screen as any).orientation.lock('landscape').catch(() => {});
+        } else {
+          await (screen as any).orientation.unlock?.().catch(() => {});
+        }
+      }
+    } catch {
+      // Ignored if browser prevents orientation lock
+    }
+    setIsLandscapeForced((prev) => !prev);
+  }, [isLandscapeForced]);
+
+  // Zoom Handling & Bounds Clamping (Up to 400% / 4.0x scale)
+  const clampPan = useCallback((x: number, y: number, scale: number) => {
+    if (!containerRef.current || scale <= 1.0) return { x: 0, y: 0 };
+    const rect = containerRef.current.getBoundingClientRect();
+    const maxPanX = ((scale - 1) * rect.width) / 2;
+    const maxPanY = ((scale - 1) * rect.height) / 2;
+    return {
+      x: Math.max(-maxPanX, Math.min(maxPanX, x)),
+      y: Math.max(-maxPanY, Math.min(maxPanY, y)),
+    };
+  }, []);
+
+  const setClampedZoom = useCallback(
+    (newScale: number, targetPan?: { x: number; y: number }) => {
+      const safeScale = Math.max(1.0, Math.min(4.0, Math.round(newScale * 100) / 100));
+      setZoomScale(safeScale);
+      if (safeScale <= 1.0) {
+        setPanOffset({ x: 0, y: 0 });
+      } else if (targetPan) {
+        setPanOffset(clampPan(targetPan.x, targetPan.y, safeScale));
+      } else {
+        setPanOffset((prev) => clampPan(prev.x, prev.y, safeScale));
+      }
+    },
+    [clampPan]
+  );
+
+  const resetZoom = useCallback(() => {
+    setZoomScale(1.0);
+    setPanOffset({ x: 0, y: 0 });
+  }, []);
+
+  // Desktop Trackpad Pinch & Mouse Wheel Zooming
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        e.preventDefault();
+        const zoomDelta = -e.deltaY * 0.015;
+        const rect = container.getBoundingClientRect();
+        const cursorX = e.clientX - rect.left - rect.width / 2;
+        const cursorY = e.clientY - rect.top - rect.height / 2;
+
+        setZoomScale((prevScale) => {
+          const nextScale = Math.max(1.0, Math.min(4.0, prevScale + zoomDelta));
+          if (nextScale <= 1.0) {
+            setPanOffset({ x: 0, y: 0 });
+            return 1.0;
+          }
+          const scaleFactor = nextScale / prevScale;
+          const newPanX = cursorX - (cursorX - panOffset.x) * scaleFactor;
+          const newPanY = cursorY - (cursorY - panOffset.y) * scaleFactor;
+          setPanOffset(clampPan(newPanX, newPanY, nextScale));
+          return nextScale;
+        });
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [panOffset, clampPan]);
+
+  // Touch Gesture Handling: Pinch-to-Zoom (2 fingers) & Pan (1 finger when zoomed)
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    resetControlsTimeout();
+
+    if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      const center = {
+        x: (t1.clientX + t2.clientX) / 2,
+        y: (t1.clientY + t2.clientY) / 2,
+      };
+      pinchStartRef.current = { dist, scale: zoomScale, center };
+    } else if (e.touches.length === 1 && zoomScale > 1.05) {
+      const t = e.touches[0];
+      isDraggingRef.current = true;
+      dragStartRef.current = {
+        x: t.clientX,
+        y: t.clientY,
+        panX: panOffset.x,
+        panY: panOffset.y,
+      };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && pinchStartRef.current) {
+      e.preventDefault();
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const curDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      const ratio = curDist / (pinchStartRef.current.dist || 1);
+      const newScale = Math.max(1.0, Math.min(4.0, pinchStartRef.current.scale * ratio));
+      setClampedZoom(newScale);
+    } else if (e.touches.length === 1 && isDraggingRef.current && zoomScale > 1.05) {
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - dragStartRef.current.x;
+      const dy = t.clientY - dragStartRef.current.y;
+      const nextX = dragStartRef.current.panX + dx;
+      const nextY = dragStartRef.current.panY + dy;
+      setPanOffset(clampPan(nextX, nextY, zoomScale));
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length < 2) {
+      pinchStartRef.current = null;
+    }
+    if (e.touches.length === 0) {
+      isDraggingRef.current = false;
+    }
+  };
+
+  // Desktop Mouse Drag Pan (when zoomed in)
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (zoomScale > 1.05) {
+      isDraggingRef.current = true;
+      dragStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        panX: panOffset.x,
+        panY: panOffset.y,
+      };
+    }
+  };
+
+  const handleMouseMoveOnPlayer = (e: React.MouseEvent<HTMLDivElement>) => {
+    resetControlsTimeout();
+    if (isDraggingRef.current && zoomScale > 1.05) {
+      const dx = e.clientX - dragStartRef.current.x;
+      const dy = e.clientY - dragStartRef.current.y;
+      const nextX = dragStartRef.current.panX + dx;
+      const nextY = dragStartRef.current.panY + dy;
+      setPanOffset(clampPan(nextX, nextY, zoomScale));
+    }
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  // Video Tap / Double-tap detection
+  const handleVideoTouchOrClick = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (isDraggingRef.current || (zoomScale > 1.05 && pinchStartRef.current)) return;
+
+    const now = Date.now();
+    const isTouch = 'touches' in e;
+    const clientX = isTouch ? (e as React.TouchEvent).changedTouches[0]?.clientX || 0 : (e as React.MouseEvent).clientX;
+
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const relativeX = clientX - rect.left;
+    const width = rect.width;
+
+    const timeDiff = now - lastTapRef.current.time;
+    const distDiff = Math.abs(clientX - lastTapRef.current.x);
+
+    // Double tap within 300ms
+    if (timeDiff < 320 && distDiff < 60) {
+      if (relativeX < width * 0.35) {
+        skip(-10);
+        setSeekFeedback({ direction: 'left', timestamp: now });
+        setTimeout(() => setSeekFeedback(null), 600);
+      } else if (relativeX > width * 0.65) {
+        skip(10);
+        setSeekFeedback({ direction: 'right', timestamp: now });
+        setTimeout(() => setSeekFeedback(null), 600);
+      } else {
+        togglePlay();
+      }
+      lastTapRef.current = { time: 0, x: 0 };
+    } else {
+      lastTapRef.current = { time: now, x: clientX };
+      setShowControls((prev) => !prev);
+      if (!showControls) {
+        resetControlsTimeout();
+      }
+    }
+  };
+
   // Save Progress API Handler
   const saveProgress = useCallback(
     async (pos: number) => {
-      if (Math.abs(pos - lastSavedPositionRef.current) < 3) return; // Throttled check
+      if (Math.abs(pos - lastSavedPositionRef.current) < 3) return;
       lastSavedPositionRef.current = pos;
       try {
         await api.updateProgress(video._id, Math.floor(pos), Math.floor(duration));
@@ -289,72 +501,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     const cur = videoRef.current.currentTime;
     setCurrentTime(cur);
 
-    // Save progress periodically every ~10s
     if (Math.floor(cur) % 10 === 0) {
       saveProgress(cur);
     }
 
-    // Record Play count after 10s of watching
     if (!hasRecordedPlay && cur >= 10) {
       setHasRecordedPlay(true);
       api.recordPlay(video._id).catch(() => {});
-    }
-  };
-
-  // Auto-hide Controls after inactivity
-  const resetControlsTimeout = useCallback(() => {
-    setShowControls(true);
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = setTimeout(() => {
-      if (isPlaying) {
-        setShowControls(false);
-        setShowSpeedMenu(false);
-      }
-    }, 3500);
-  }, [isPlaying]);
-
-  const handleMouseMove = () => {
-    resetControlsTimeout();
-  };
-
-  // Handle Touch/Click on Video Player (with Double-Tap Detection)
-  const handleVideoTouchOrClick = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
-    const now = Date.now();
-    const isTouch = 'touches' in e;
-    const clientX = isTouch ? (e as React.TouchEvent).changedTouches[0].clientX : (e as React.MouseEvent).clientX;
-
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const relativeX = clientX - rect.left;
-    const width = rect.width;
-
-    const timeDiff = now - lastTapRef.current.time;
-    const distDiff = Math.abs(clientX - lastTapRef.current.x);
-
-    // Double tap within 300ms in same area
-    if (timeDiff < 320 && distDiff < 60) {
-      if (relativeX < width * 0.4) {
-        // Double tapped LEFT: -10s
-        skip(-10);
-        setSeekFeedback({ direction: 'left', timestamp: now });
-        setTimeout(() => setSeekFeedback(null), 700);
-      } else if (relativeX > width * 0.6) {
-        // Double tapped RIGHT: +10s
-        skip(10);
-        setSeekFeedback({ direction: 'right', timestamp: now });
-        setTimeout(() => setSeekFeedback(null), 700);
-      } else {
-        // Double tapped center: toggle play
-        togglePlay();
-      }
-      lastTapRef.current = { time: 0, x: 0 };
-    } else {
-      // Single tap: record for potential double tap & toggle controls overlay
-      lastTapRef.current = { time: now, x: clientX };
-      setShowControls((prev) => !prev);
-      if (!showControls) {
-        resetControlsTimeout();
-      }
     }
   };
 
@@ -409,6 +562,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           e.preventDefault();
           toggleFullscreen();
           break;
+        case 'l':
+        case 'L':
+          e.preventDefault();
+          toggleOrientation();
+          break;
+        case '+':
+        case '=':
+          e.preventDefault();
+          setClampedZoom(zoomScale + 0.25);
+          break;
+        case '-':
+        case '_':
+          e.preventDefault();
+          setClampedZoom(zoomScale - 0.25);
+          break;
+        case '0':
+          e.preventDefault();
+          resetZoom();
+          break;
         default:
           break;
       }
@@ -416,7 +588,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, skip, toggleMute, toggleFullscreen]);
+  }, [togglePlay, skip, toggleMute, toggleFullscreen, toggleOrientation, zoomScale, setClampedZoom, resetZoom]);
 
   // Save progress on pause or unmount
   useEffect(() => {
@@ -457,65 +629,105 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     <div
       ref={containerRef}
       id="video-player-container"
-      onMouseMove={handleMouseMove}
+      onMouseMove={handleMouseMoveOnPlayer}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       className={`relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl group flex flex-col items-center justify-center select-none ${
-        isFullscreen ? 'fixed inset-0 z-50 rounded-none w-screen h-screen' : ''
+        isFullscreen
+          ? isLandscapeForced
+            ? 'fixed inset-0 z-50 w-[100vh] h-[100vw] rotate-90 origin-top-left translate-x-full rounded-none overflow-hidden'
+            : 'fixed inset-0 z-50 rounded-none w-screen h-screen'
+          : isLandscapeForced
+          ? 'fixed inset-0 z-50 w-[100vh] h-[100vw] rotate-90 origin-top-left translate-x-full rounded-none overflow-hidden'
+          : ''
       }`}
+      style={{ touchAction: zoomScale > 1.05 ? 'none' : 'auto' }}
     >
-      {/* HTML5 Video Element */}
-      <video
-        ref={videoRef}
-        src={streamUrl}
-        crossOrigin="anonymous"
-        preload="auto"
-        onLoadedMetadata={handleLoadedMetadata}
-        onTimeUpdate={handleTimeUpdate}
-        onWaiting={() => setIsWaiting(true)}
-        onSeeking={() => setIsWaiting(true)}
-        onLoadStart={() => setIsWaiting(true)}
-        onLoadedData={() => setIsWaiting(false)}
-        onCanPlay={() => setIsWaiting(false)}
-        onCanPlayThrough={() => setIsWaiting(false)}
-        onPlaying={() => {
-          setIsWaiting(false);
-          setIsPlaying(true);
+      {/* Zoomable & Pannable Video Canvas Wrapper (Up to 400% scale) */}
+      <div
+        ref={videoWrapperRef}
+        className="w-full h-full flex items-center justify-center transition-transform duration-75 ease-out origin-center"
+        style={{
+          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
+          cursor: zoomScale > 1.05 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default',
         }}
-        onSeeked={() => setIsWaiting(false)}
-        onPause={() => {
-          setIsPlaying(false);
-          setIsWaiting(false);
-          if (videoRef.current) saveProgress(videoRef.current.currentTime);
-        }}
-        onEnded={() => {
-          setIsPlaying(false);
-          setIsWaiting(false);
-          if (videoRef.current) saveProgress(videoRef.current.duration);
-        }}
-        onError={() => setIsWaiting(false)}
-        className="w-full h-full object-contain cursor-pointer"
-        playsInline
-      />
+      >
+        <video
+          ref={videoRef}
+          src={streamUrl}
+          crossOrigin="anonymous"
+          preload="auto"
+          onLoadedMetadata={handleLoadedMetadata}
+          onTimeUpdate={handleTimeUpdate}
+          onWaiting={() => setIsWaiting(true)}
+          onSeeking={() => setIsWaiting(true)}
+          onLoadStart={() => setIsWaiting(true)}
+          onLoadedData={() => setIsWaiting(false)}
+          onCanPlay={() => setIsWaiting(false)}
+          onCanPlayThrough={() => setIsWaiting(false)}
+          onPlaying={() => {
+            setIsWaiting(false);
+            setIsPlaying(true);
+            resetControlsTimeout();
+          }}
+          onSeeked={() => setIsWaiting(false)}
+          onPause={() => {
+            setIsPlaying(false);
+            setIsWaiting(false);
+            if (videoRef.current) saveProgress(videoRef.current.currentTime);
+          }}
+          onEnded={() => {
+            setIsPlaying(false);
+            setIsWaiting(false);
+            if (videoRef.current) saveProgress(videoRef.current.duration);
+          }}
+          onError={() => setIsWaiting(false)}
+          className="w-full h-full object-contain pointer-events-none"
+          playsInline
+        />
+      </div>
 
-      {/* Invisible Touch Layer over the video for tap & double-tap gestures */}
+      {/* Invisible Touch/Click Layer */}
       <div
         className="absolute inset-0 z-10 cursor-pointer"
         onClick={handleVideoTouchOrClick}
       />
 
+      {/* Zoom Badge Indicator with 1-Tap Reset */}
+      {zoomScale > 1.05 && (
+        <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-30 flex items-center gap-1.5 bg-black/85 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-400/40 text-amber-400 text-xs font-mono font-bold shadow-2xl">
+          <ZoomIn className="w-3.5 h-3.5" />
+          <span>{Math.round(zoomScale * 100)}%</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              resetZoom();
+            }}
+            className="ml-1 bg-zinc-800 hover:bg-zinc-700 text-white text-[10px] px-1.5 py-0.5 rounded-full transition-colors font-sans"
+            title="Reset Zoom (0)"
+          >
+            Reset
+          </button>
+        </div>
+      )}
+
       {/* Double Tap Seek Feedback Ripple Animations */}
       {seekFeedback && (
         <div className="absolute inset-0 z-25 pointer-events-none flex items-center justify-between px-8 sm:px-16">
           {seekFeedback.direction === 'left' && (
-            <div className="flex flex-col items-center gap-1 bg-black/70 backdrop-blur-md px-5 py-4 rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
-              <RotateCcw className="w-8 h-8 animate-spin-once" />
-              <span className="text-sm font-extrabold font-mono tracking-wide">-10s</span>
+            <div className="flex flex-col items-center gap-1 bg-black/70 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
+              <RotateCcw className="w-7 h-7 animate-spin-once" />
+              <span className="text-xs font-extrabold font-mono tracking-wide">-10s</span>
             </div>
           )}
           <div className="flex-1" />
           {seekFeedback.direction === 'right' && (
-            <div className="flex flex-col items-center gap-1 bg-black/70 backdrop-blur-md px-5 py-4 rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
-              <RotateCw className="w-8 h-8 animate-spin-once" />
-              <span className="text-sm font-extrabold font-mono tracking-wide">+10s</span>
+            <div className="flex flex-col items-center gap-1 bg-black/70 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
+              <RotateCw className="w-7 h-7 animate-spin-once" />
+              <span className="text-xs font-extrabold font-mono tracking-wide">+10s</span>
             </div>
           )}
         </div>
@@ -528,43 +740,56 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         </div>
       )}
 
-      {/* Resume Playback Prompt Banner */}
+      {/* Minimal 2-Second Auto-Dismiss Resume Prompt */}
       {showResumePrompt && (
-        <div className="absolute top-4 left-4 right-4 sm:top-6 sm:left-6 sm:right-6 z-30 glass-panel bg-zinc-950/95 p-3 sm:p-4 rounded-xl border border-white/10 flex flex-wrap items-center justify-between gap-2 shadow-2xl animate-fade-in">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 shrink-0" />
-            <span className="text-xs sm:text-sm font-medium text-white">
-              Resume from <span className="font-mono text-amber-300 font-bold">{resumePositionFormatted}</span>?
-            </span>
-          </div>
-          <div className="flex items-center gap-2 ml-auto">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (videoRef.current) videoRef.current.currentTime = video.lastPosition;
-                setShowResumePrompt(false);
-              }}
-              className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold rounded-lg shadow-md active:scale-95"
-            >
-              Resume
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowResumePrompt(false);
-              }}
-              className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg"
-            >
-              Start Over
-            </button>
-          </div>
+        <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-30 flex items-center gap-2 bg-zinc-950/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-amber-400/40 shadow-2xl animate-fade-in text-xs select-none">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (videoRef.current && video.lastPosition) {
+                videoRef.current.currentTime = video.lastPosition;
+              }
+              setShowResumePrompt(false);
+            }}
+            className="flex items-center gap-1.5 font-bold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+            <span>Resume at <span className="font-mono text-white underline">{resumePositionFormatted}</span></span>
+          </button>
+          <div className="w-[1px] h-3 bg-white/20" />
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowResumePrompt(false);
+            }}
+            className="text-zinc-400 hover:text-white p-0.5 rounded-full hover:bg-zinc-800 transition-colors cursor-pointer"
+            title="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
-      {/* Controls Overlay */}
+      {/* Center Clean Play Button (Shown cleanly when paused) */}
+      {!isPlaying && !isWaiting && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+            title="Play (Space)"
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 hover:bg-amber-300 transition-all pointer-events-auto cursor-pointer"
+          >
+            <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Controls Overlay (Fades out automatically after 1 second) */}
       <div
-        className={`absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/70 transition-opacity duration-300 flex flex-col justify-between p-3 sm:p-5 z-20 pointer-events-none ${
-          showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
+        className={`absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/75 transition-opacity duration-200 flex flex-col justify-between p-3 sm:p-4 z-20 pointer-events-none ${
+          showControls ? 'opacity-100' : 'opacity-0'
         }`}
       >
         {/* Top Header Row */}
@@ -572,104 +797,96 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           <Link
             href="/"
             onClick={(e) => e.stopPropagation()}
-            className="min-h-[38px] px-3 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 flex items-center gap-1.5 text-xs font-semibold backdrop-blur-md active:scale-95 shadow-md shrink-0"
+            className="px-2.5 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 flex items-center gap-1 text-xs font-semibold backdrop-blur-md active:scale-95 shadow-md shrink-0"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Library</span>
           </Link>
 
-          <h3 className="font-semibold text-xs sm:text-sm text-white line-clamp-1 max-w-[200px] sm:max-w-md text-center px-2">
+          <h3 className="font-semibold text-xs sm:text-sm text-white line-clamp-1 max-w-[180px] sm:max-w-md text-center px-1">
             {video.title}
           </h3>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Landscape / Portrait Orientation Freedom Toggle */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleOrientation();
+              }}
+              title={isLandscapeForced ? 'Switch to Portrait' : 'Switch to Landscape (L)'}
+              className={`px-2 py-1.5 rounded-xl border backdrop-blur-md flex items-center gap-1 text-xs font-semibold active:scale-95 transition-all shadow-md ${
+                isLandscapeForced
+                  ? 'bg-amber-400 text-black border-amber-400 font-extrabold'
+                  : 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border-zinc-800'
+              }`}
+            >
+              <Rotate3d className="w-3.5 h-3.5" />
+              <span className="text-[11px] hidden sm:inline">{isLandscapeForced ? 'Landscape' : 'Rotate'}</span>
+            </button>
+
+            {/* Privacy Mode */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 handleTogglePrivacy();
               }}
               title="Privacy Mode (P)"
-              className="w-9 h-9 sm:w-9 sm:h-9 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md"
+              className="w-8 h-8 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md hidden sm:flex"
             >
-              <EyeOff className="w-4 h-4" />
+              <EyeOff className="w-3.5 h-3.5" />
             </button>
+
+            {/* Panic Lock */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 handleLockApp();
               }}
-              title="Panic Lock (Ctrl+Shift+L)"
-              className="w-9 h-9 sm:w-9 sm:h-9 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md"
+              title="Panic Lock"
+              className="w-8 h-8 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md hidden sm:flex"
             >
-              <Lock className="w-4 h-4" />
+              <Lock className="w-3.5 h-3.5" />
             </button>
-            {/* Top Quick Fullscreen button for mobile ease */}
+
+            {/* Fullscreen Toggle */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 toggleFullscreen();
               }}
-              title="Toggle Fullscreen"
-              className="w-9 h-9 sm:w-9 sm:h-9 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md sm:hidden"
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              className="w-8 h-8 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-amber-400 border border-zinc-800 backdrop-blur-md flex items-center justify-center active:scale-95 shadow-md"
             >
-              {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+              {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>
 
-        {/* Center Control Cluster with Large Play/Pause & Thumb Skip Buttons */}
-        <div className="self-center flex items-center justify-center gap-6 sm:gap-10 pointer-events-auto my-auto">
-          {/* Skip -10s button */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              skip(-10);
-            }}
-            title="Rewind 10 seconds"
-            className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-zinc-900/80 hover:bg-zinc-800 border border-white/10 text-white flex items-center justify-center shadow-xl active:scale-90 transition-transform backdrop-blur-md cursor-pointer"
-          >
-            <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6" />
-          </button>
-
-          {/* Large Center Play / Pause Button */}
-          {!isWaiting && (
+        {/* Center Pause/Play Action (Only visible when controls are active during play) */}
+        {isPlaying && (
+          <div className="self-center pointer-events-auto">
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 togglePlay();
               }}
-              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-              className="w-14 h-14 sm:w-18 sm:h-18 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 hover:bg-amber-300 transition-all backdrop-blur-md cursor-pointer"
+              title="Pause (Space)"
+              className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 hover:bg-amber-300 transition-all backdrop-blur-md cursor-pointer"
             >
-              {isPlaying ? (
-                <Pause className="w-7 h-7 sm:w-8 sm:h-8 fill-current" />
-              ) : (
-                <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
-              )}
+              <Pause className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
             </button>
-          )}
+          </div>
+        )}
 
-          {/* Skip +10s button */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              skip(10);
-            }}
-            title="Forward 10 seconds"
-            className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-zinc-900/80 hover:bg-zinc-800 border border-white/10 text-white flex items-center justify-center shadow-xl active:scale-90 transition-transform backdrop-blur-md cursor-pointer"
-          >
-            <RotateCw className="w-5 h-5 sm:w-6 sm:h-6" />
-          </button>
-        </div>
-
-        {/* Bottom Control Bar */}
+        {/* Bottom Timeline & Controls Bar */}
         <div
-          className="space-y-2 sm:space-y-2.5 pointer-events-auto bg-zinc-950/60 sm:bg-transparent p-2 sm:p-0 rounded-2xl backdrop-blur-sm sm:backdrop-blur-none"
+          className="space-y-1.5 sm:space-y-2 pointer-events-auto bg-zinc-950/70 sm:bg-transparent p-2 sm:p-0 rounded-xl backdrop-blur-sm sm:backdrop-blur-none"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* YouTube Style Scrubber Bar with Touch Drag Support */}
+          {/* Scrubber Bar */}
           <div className="flex items-center gap-2 sm:gap-3">
-            <span className="font-mono text-[11px] sm:text-xs text-slate-300 min-w-[36px] sm:min-w-[42px] text-right font-medium">
+            <span className="font-mono text-[11px] sm:text-xs text-slate-300 min-w-[34px] sm:min-w-[40px] text-right font-medium">
               {formatTime(currentTime)}
             </span>
             <div className="flex-1">
@@ -683,35 +900,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 maxBufferAhead={120}
               />
             </div>
-            <span className="font-mono text-[11px] sm:text-xs text-slate-400 min-w-[36px] sm:min-w-[42px] font-medium">
+            <span className="font-mono text-[11px] sm:text-xs text-slate-400 min-w-[34px] sm:min-w-[40px] font-medium">
               {formatTime(duration)}
             </span>
           </div>
 
           {/* Action Buttons Row */}
-          <div className="flex items-center justify-between gap-1 sm:gap-3 pt-0.5">
-            {/* Left Controls: Play/Pause, Skip, Volume */}
+          <div className="flex items-center justify-between gap-1 sm:gap-3">
+            {/* Left Controls */}
             <div className="flex items-center gap-1 sm:gap-2">
-              {/* Play/Pause */}
               <button
                 onClick={togglePlay}
-                className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-200 hover:text-white hover:bg-zinc-800/60 active:scale-95 transition-all"
+                className="w-8 h-8 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-slate-200 hover:text-white hover:bg-zinc-800/60 active:scale-95"
                 title={isPlaying ? 'Pause' : 'Play'}
               >
-                {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              </button>
+
+              <button
+                onClick={() => skip(-10)}
+                title="Rewind 10s"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={() => skip(10)}
+                title="Forward 10s"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
               </button>
 
               {/* Volume / Mute Button & Slider */}
-              <div className="flex items-center gap-1.5 group/vol">
+              <div className="flex items-center gap-1">
                 <button
                   onClick={toggleMute}
-                  className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
                   title="Mute / Unmute"
                 >
                   {isMuted || volume === 0 ? (
-                    <VolumeX className="w-4 h-4 sm:w-5 sm:h-5 text-rose-400" />
+                    <VolumeX className="w-4 h-4 text-rose-400" />
                   ) : (
-                    <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <Volume2 className="w-4 h-4" />
                   )}
                 </button>
                 <input
@@ -721,69 +953,77 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                   step={0.05}
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="w-14 sm:w-20 h-1.5 hidden sm:block accent-amber-400 cursor-pointer"
-                  title="Volume slider"
+                  className="w-14 sm:w-18 h-1.5 hidden sm:block accent-amber-400 cursor-pointer"
+                  title="Volume"
                 />
               </div>
             </div>
 
-            {/* Right Controls: Speed Selector, PiP, Fullscreen */}
+            {/* Right Controls */}
             <div className="flex items-center gap-1 sm:gap-2 relative">
-              {/* Playback Speed Quick Control */}
+              {/* Zoom Buttons (+ / - / Reset) */}
+              <div className="flex items-center bg-zinc-900/90 border border-zinc-700/70 rounded-lg px-1 py-0.5 text-xs text-zinc-300">
+                <button
+                  onClick={() => setClampedZoom(zoomScale - 0.25)}
+                  disabled={zoomScale <= 1.0}
+                  className="p-1 hover:text-amber-400 disabled:opacity-30 active:scale-95"
+                  title="Zoom Out (-)"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <span className="font-mono text-[10px] font-bold px-1 text-amber-300 min-w-[28px] text-center">
+                  {Math.round(zoomScale * 100)}%
+                </span>
+                <button
+                  onClick={() => setClampedZoom(zoomScale + 0.25)}
+                  disabled={zoomScale >= 4.0}
+                  className="p-1 hover:text-amber-400 disabled:opacity-30 active:scale-95"
+                  title="Zoom In (+)"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Playback Speed */}
               <div className="relative">
                 <button
                   onClick={() => setShowSpeedMenu((prev) => !prev)}
-                  className="px-2 sm:px-2.5 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-200 text-xs font-mono font-bold flex items-center gap-1 shadow-sm active:scale-95"
-                  title="Change Playback Speed"
+                  className="px-2 py-1 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-200 text-xs font-mono font-bold flex items-center gap-1 active:scale-95"
+                  title="Playback Speed"
                 >
-                  <Gauge className="w-3.5 h-3.5 text-amber-400 hidden xs:inline" />
+                  <Gauge className="w-3 h-3 text-amber-400" />
                   <span>{playbackSpeed.toFixed(1)}x</span>
                 </button>
 
-                {/* Speed Dropdown Menu */}
                 {showSpeedMenu && (
-                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700 rounded-xl p-1.5 shadow-2xl backdrop-blur-md flex flex-col gap-1 min-w-[110px] z-50 animate-fade-in">
-                    <div className="text-[10px] uppercase font-bold text-zinc-400 px-2 py-1 border-b border-zinc-800">
-                      Playback Speed
+                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700 rounded-xl p-1.5 shadow-2xl backdrop-blur-md flex flex-col gap-1 min-w-[100px] z-50 animate-fade-in">
+                    <div className="text-[10px] uppercase font-bold text-zinc-400 px-2 py-0.5 border-b border-zinc-800">
+                      Speed
                     </div>
-                    {[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].map((s) => (
+                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((s) => (
                       <button
                         key={s}
                         onClick={() => changePlaybackSpeed(s)}
-                        className={`px-3 py-1 text-xs text-left font-mono rounded-lg transition-colors flex items-center justify-between ${
+                        className={`px-2.5 py-1 text-xs text-left font-mono rounded-lg transition-colors flex items-center justify-between ${
                           Math.abs(s - playbackSpeed) < 0.05
                             ? 'bg-amber-400 text-black font-extrabold'
                             : 'text-zinc-300 hover:bg-zinc-800'
                         }`}
                       >
                         <span>{s.toFixed(2)}x</span>
-                        {s === 1.0 && <span className="text-[10px] opacity-70">Normal</span>}
                       </button>
                     ))}
                   </div>
                 )}
               </div>
 
-              {/* Picture-in-Picture Button */}
+              {/* Picture-in-Picture */}
               <button
                 onClick={togglePictureInPicture}
-                title="Picture in Picture (Floating window)"
-                className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl hidden sm:flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
+                title="Picture in Picture"
+                className="w-8 h-8 rounded-lg hidden sm:flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800/60 active:scale-95"
               >
-                <PictureInPicture className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-
-              {/* Large, Prominent Fullscreen Button */}
-              <button
-                onClick={toggleFullscreen}
-                title={isFullscreen ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'}
-                className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl bg-amber-400/20 hover:bg-amber-400 text-amber-300 hover:text-black border border-amber-400/40 flex items-center justify-center active:scale-95 transition-all shadow-md cursor-pointer ml-1"
-              >
-                {isFullscreen ? (
-                  <Minimize className="w-5 h-5" />
-                ) : (
-                  <Maximize className="w-5 h-5" />
-                )}
+                <PictureInPicture className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -792,4 +1032,3 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     </div>
   );
 };
-
