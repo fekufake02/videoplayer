@@ -204,6 +204,37 @@ class ApiClient {
   }
 
   /**
+   * Check upload status for chunk resuming
+   */
+  async getUploadStatus(key: string): Promise<{
+    success: boolean;
+    exists: boolean;
+    uploadedBytes: number;
+    totalSize: number;
+    completed: boolean;
+  }> {
+    try {
+      return await this.request<{
+        success: boolean;
+        exists: boolean;
+        uploadedBytes: number;
+        totalSize: number;
+        completed: boolean;
+      }>(`/upload-status?key=${encodeURIComponent(key)}`, {
+        method: 'GET',
+      });
+    } catch {
+      return {
+        success: false,
+        exists: false,
+        uploadedBytes: 0,
+        totalSize: 0,
+        completed: false,
+      };
+    }
+  }
+
+  /**
    * Helper to fetch all videos across all pagination pages (e.g. for batch migrations)
    */
   async getAllVideos(): Promise<IVideo[]> {

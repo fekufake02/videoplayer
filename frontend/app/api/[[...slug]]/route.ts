@@ -145,8 +145,14 @@ const initialVideos: IVideoItem[] = [
 ];
 
 // Global in-memory stores
+interface UploadBlobRecord {
+  buffer: Buffer;
+  mimeType: string;
+  totalSize?: number;
+  uploadedBytes?: number;
+}
 const globalVideos: Map<string, IVideoItem> = new Map(initialVideos.map((v) => [v._id, v]));
-const uploadedBlobs: Map<string, { buffer: Buffer; mimeType: string }> = new Map();
+const uploadedBlobs: Map<string, UploadBlobRecord> = new Map();
 
 let globalSettings: ISettingsItem = {
   userId: 'admin-1',
@@ -556,6 +562,36 @@ export async function GET(
     return NextResponse.json({
       success: true,
       video,
+    });
+  }
+
+  // 10. Check Upload Progress / Resume Status: /api/upload-status?key=...
+  if (path === 'upload-status') {
+    const key = req.nextUrl.searchParams.get('key');
+    if (!key) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Missing key param' } },
+        { status: 400 }
+      );
+    }
+    const record = uploadedBlobs.get(key);
+    if (!record) {
+      return NextResponse.json({
+        success: true,
+        exists: false,
+        uploadedBytes: 0,
+        totalSize: 0,
+        completed: false,
+      });
+    }
+    const uploadedBytes = record.uploadedBytes ?? record.buffer.length;
+    const totalSize = record.totalSize ?? record.buffer.length;
+    return NextResponse.json({
+      success: true,
+      exists: true,
+      uploadedBytes,
+      totalSize,
+      completed: uploadedBytes > 0 && totalSize > 0 && uploadedBytes >= totalSize,
     });
   }
 
@@ -984,14 +1020,112 @@ export async function PUT(
     }
 
     try {
-      const buffer = Buffer.from(await req.arrayBuffer());
+      const chunkBuffer = Buffer.from(await req.arrayBuffer());
       const mimeType = req.headers.get('content-type') || 'video/mp4';
-      uploadedBlobs.set(key, { buffer, mimeType });
+      const contentRange = req.headers.get('content-range');
+      const offsetParam = req.nextUrl.searchParams.get('offset');
+      const totalParam = req.nextUrl.searchParams.get('total');
+
+      if (contentRange) {
+        const match = contentRange.match(/bytes\s+(\d+)-(\d+)\/(\d+|\*)/);
+        if (match) {
+          const start = parseInt(match[1], 10);
+          const end = parseInt(match[2], 10);
+          const total = match[3] !== '*' ? parseInt(match[3], 10) : undefined;
+
+          let record = uploadedBlobs.get(key);
+          if (!record || !record.buffer || (total && record.buffer.length !== total)) {
+            const allocSize = total || end + 1;
+            const newBuf = Buffer.alloc(allocSize);
+            if (record?.buffer) {
+              record.buffer.copy(newBuf, 0, 0, Math.min(record.buffer.length, allocSize));
+            }
+            record = {
+              buffer: newBuf,
+              mimeType,
+              totalSize: total,
+              uploadedBytes: 0,
+            };
+            uploadedBlobs.set(key, record);
+          }
+
+          // Write incoming chunk slice into buffer at offset start
+          chunkBuffer.copy(record.buffer, start);
+          const newUploadedBytes = Math.max(record.uploadedBytes || 0, end + 1);
+          record.uploadedBytes = newUploadedBytes;
+          if (mimeType) record.mimeType = mimeType;
+
+          const isComplete = total ? newUploadedBytes >= total : false;
+
+          return NextResponse.json(
+            {
+              success: true,
+              uploadedBytes: newUploadedBytes,
+              totalSize: total || record.buffer.length,
+              completed: isComplete,
+            },
+            {
+              status: 200,
+              headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Range': `bytes=0-${newUploadedBytes - 1}`,
+              },
+            }
+          );
+        }
+      } else if (offsetParam && totalParam) {
+        const start = parseInt(offsetParam, 10);
+        const total = parseInt(totalParam, 10);
+        const end = start + chunkBuffer.length - 1;
+
+        let record = uploadedBlobs.get(key);
+        if (!record || !record.buffer || record.buffer.length !== total) {
+          const newBuf = Buffer.alloc(total);
+          if (record?.buffer) {
+            record.buffer.copy(newBuf, 0, 0, Math.min(record.buffer.length, total));
+          }
+          record = {
+            buffer: newBuf,
+            mimeType,
+            totalSize: total,
+            uploadedBytes: 0,
+          };
+          uploadedBlobs.set(key, record);
+        }
+
+        chunkBuffer.copy(record.buffer, start);
+        const newUploadedBytes = Math.max(record.uploadedBytes || 0, end + 1);
+        record.uploadedBytes = newUploadedBytes;
+        if (mimeType) record.mimeType = mimeType;
+        const isComplete = newUploadedBytes >= total;
+
+        return NextResponse.json(
+          {
+            success: true,
+            uploadedBytes: newUploadedBytes,
+            totalSize: total,
+            completed: isComplete,
+          },
+          {
+            status: 200,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          }
+        );
+      }
+
+      // Monolithic full-file upload (for small items or thumbnails)
+      uploadedBlobs.set(key, {
+        buffer: chunkBuffer,
+        mimeType,
+        totalSize: chunkBuffer.length,
+        uploadedBytes: chunkBuffer.length,
+      });
       return new NextResponse('OK', {
         status: 200,
         headers: { 'Access-Control-Allow-Origin': '*' },
       });
     } catch (e: any) {
+      console.error('Upload error in PUT receiver:', e);
       return new NextResponse('Upload error', {
         status: 500,
         headers: { 'Access-Control-Allow-Origin': '*' },
@@ -1003,6 +1137,37 @@ export async function PUT(
     status: 404,
     headers: { 'Access-Control-Allow-Origin': '*' },
   });
+}
+
+export async function HEAD(
+  req: NextRequest,
+  { params }: { params: { slug?: string[] } }
+) {
+  const slug = params?.slug || [];
+  const path = slug.join('/');
+
+  if (path === 'upload-receiver') {
+    const key = req.nextUrl.searchParams.get('key');
+    if (!key) {
+      return new NextResponse(null, { status: 400, headers: { 'Access-Control-Allow-Origin': '*' } });
+    }
+    const record = uploadedBlobs.get(key);
+    const uploadedBytes = record?.uploadedBytes ?? record?.buffer.length ?? 0;
+    const totalSize = record?.totalSize ?? record?.buffer.length ?? 0;
+
+    return new NextResponse(null, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Length': '0',
+        'Range': `bytes=0-${Math.max(0, uploadedBytes - 1)}`,
+        'X-Uploaded-Bytes': uploadedBytes.toString(),
+        'X-Total-Bytes': totalSize.toString(),
+      },
+    });
+  }
+
+  return new NextResponse(null, { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } });
 }
 
 export async function OPTIONS() {

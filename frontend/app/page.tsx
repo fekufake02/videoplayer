@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useUpload } from '../context/UploadContext';
 import { api } from '../lib/api';
 import { IVideo, HomeSections } from '../types';
 import { Navbar } from '../components/Navbar';
 import { VideoCard } from '../components/VideoCard';
 import { VideoGrid } from '../components/VideoGrid';
-import { UploadModal } from '../components/UploadModal';
 import { EditMetadataModal } from '../components/EditMetadataModal';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
 import { PlayCircle, Clock, Flame, Sparkles } from 'lucide-react';
@@ -15,6 +15,7 @@ import { getLibraryState, saveLibraryState } from '../lib/libraryState';
 
 export default function LibraryHomePage() {
   const { isAuthenticated, isLoading } = useAuth();
+  const { openUploadModal } = useUpload();
 
   const [homeSections, setHomeSections] = useState<HomeSections>({
     continueWatching: [],
@@ -61,7 +62,6 @@ export default function LibraryHomePage() {
   });
 
   // Modals state
-  const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [editingVideo, setEditingVideo] = useState<IVideo | null>(null);
   const [deletingVideo, setDeletingVideo] = useState<IVideo | null>(null);
 
@@ -170,6 +170,16 @@ export default function LibraryHomePage() {
     fetchGridData();
   };
 
+  useEffect(() => {
+    const handleUploadedEvent = () => {
+      handleRefreshAll();
+    };
+    window.addEventListener('vault-media-uploaded', handleUploadedEvent);
+    return () => {
+      window.removeEventListener('vault-media-uploaded', handleUploadedEvent);
+    };
+  }, [handleRefreshAll]);
+
   if (isLoading || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -181,7 +191,7 @@ export default function LibraryHomePage() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Navbar
-        onOpenUpload={() => setIsUploadOpen(true)}
+        onOpenUpload={openUploadModal}
         searchQuery={searchQuery}
         onSearchChange={(q) => {
           setSearchQuery(q);
@@ -293,12 +303,6 @@ export default function LibraryHomePage() {
       </main>
 
       {/* Modals */}
-      <UploadModal
-        isOpen={isUploadOpen}
-        onClose={() => setIsUploadOpen(false)}
-        onSuccess={handleRefreshAll}
-      />
-
       <EditMetadataModal
         video={editingVideo}
         onClose={() => setEditingVideo(null)}

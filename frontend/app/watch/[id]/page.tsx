@@ -186,9 +186,9 @@ export default function WatchPage() {
     <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-6 space-y-4 sm:space-y-6">
         {/* Top Back Navigation Breadcrumb */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between px-1 sm:px-0">
           <button
             onClick={() => router.back()}
             className="inline-flex items-center gap-2 text-xs font-semibold text-slate-300 hover:text-amber-400 bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 px-3.5 py-2 rounded-xl transition-all shadow-sm group cursor-pointer"
@@ -199,14 +199,14 @@ export default function WatchPage() {
         </div>
 
         {loadingMedia ? (
-          <div className="w-full aspect-video bg-slate-900 rounded-2xl flex items-center justify-center">
+          <div className="w-full aspect-video bg-slate-900 rounded-xl sm:rounded-2xl flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
               <span className="text-xs text-slate-400">Loading private stream...</span>
             </div>
           </div>
         ) : error ? (
-          <div className="glass-panel p-12 rounded-2xl text-center flex flex-col items-center justify-center border border-rose-900/40">
+          <div className="glass-panel p-8 sm:p-12 rounded-xl sm:rounded-2xl text-center flex flex-col items-center justify-center border border-rose-900/40">
             <AlertCircle className="w-10 h-10 text-rose-400 mb-3" />
             <h3 className="text-base font-semibold text-white mb-1">Error Loading Video</h3>
             <p className="text-xs text-slate-400 mb-4">{error}</p>
@@ -224,13 +224,13 @@ export default function WatchPage() {
             <VideoPlayer video={video} streamUrl={streamUrl} />
 
             {/* Video Details & Meta Header */}
-            <div className="glass-panel p-6 rounded-2xl space-y-6 border border-slate-800">
-              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-6 border-b border-slate-800">
+            <div className="glass-panel p-4 sm:p-6 rounded-xl sm:rounded-2xl space-y-4 sm:space-y-6 border border-slate-800">
+              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-4 sm:pb-6 border-b border-slate-800">
                 <div>
-                  <h1 className="text-2xl font-bold text-white tracking-tight mb-2">
+                  <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight mb-2">
                     {video.title}
                   </h1>
-                  <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-400">
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-mono text-slate-400">
                     <span className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-indigo-400" />
                       {formatDate(video.createdAt)}

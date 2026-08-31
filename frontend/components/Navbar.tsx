@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
+import { useUpload } from '../context/UploadContext';
 import { Shield, Lock, EyeOff, Plus, Settings as SettingsIcon, LogOut, Search } from 'lucide-react';
 
 interface NavbarProps {
@@ -18,12 +19,49 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSearchChange,
 }) => {
   const { isPrivacyActive, togglePrivacyMode, lockApp, logout } = useAuth();
+  const { openUploadModal } = useUpload();
   const router = useRouter();
 
+  const handleUploadClick = onOpenUpload || openUploadModal;
+
+  // Auto-hide navbar on scroll down to allow full view of video, reveal on scroll up
+  const [isVisible, setIsVisible] = useState(true);
+  const lastScrollY = useRef(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      
+      // Always show at the very top of the page
+      if (currentScrollY < 15) {
+        setIsVisible(true);
+        lastScrollY.current = currentScrollY;
+        return;
+      }
+
+      // Hide when scrolling down, show when scrolling up
+      if (currentScrollY > lastScrollY.current && currentScrollY > 60) {
+        setIsVisible(false);
+      } else if (currentScrollY < lastScrollY.current) {
+        setIsVisible(true);
+      }
+
+      lastScrollY.current = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   return (
-    <header className="sticky top-0 z-40 glass-nav px-4 lg:px-8 py-3.5 flex items-center justify-between gap-4">
+    <header
+      id="main-navbar"
+      className={`sticky top-0 z-40 glass-nav px-4 lg:px-8 py-3.5 flex items-center justify-between gap-4 transition-transform duration-300 ease-in-out ${
+        isVisible ? 'translate-y-0' : '-translate-y-full shadow-none'
+      }`}
+    >
       {/* My Vault Brand Logo */}
-      <Link href="/" className="flex items-center gap-2.5 group">
+      <Link href="/" className="flex items-center gap-2.5 group shrink-0">
         <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-105 transition-all text-base tracking-tighter">
           V
         </div>
@@ -47,16 +85,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       )}
 
       {/* Header Controls */}
-      <div className="flex items-center gap-2 sm:gap-3">
-        {onOpenUpload && (
-          <button
-            onClick={onOpenUpload}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-amber-400/20"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Upload</span>
-          </button>
-        )}
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <button
+          onClick={handleUploadClick}
+          className="flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-amber-400/20 active:scale-95"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Upload</span>
+        </button>
 
         {/* Privacy Toggle */}
         <button
@@ -85,7 +121,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Settings */}
         <Link
           href="/settings"
-          className="p-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-all"
+          className="p-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center justify-center"
           title="Settings"
         >
           <SettingsIcon className="w-4 h-4" />
@@ -95,7 +131,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button
           onClick={logout}
           title="Logout"
-          className="p-2 bg-slate-900 border border-slate-800 hover:bg-rose-950/40 hover:border-rose-900/50 text-slate-400 hover:text-rose-400 rounded-xl transition-all"
+          className="p-2 bg-slate-900 border border-slate-800 hover:bg-rose-950/40 hover:border-rose-900/50 text-slate-400 hover:text-rose-400 rounded-xl transition-all flex items-center justify-center"
         >
           <LogOut className="w-4 h-4" />
         </button>
@@ -103,3 +139,4 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+

@@ -4,7 +4,7 @@ import { api } from './api';
 import { canvasToWebP, generateBlurhashFromCanvas } from './thumbnailOptimizer';
 
 /**
- * Creates a clean fallback canvas graphic if video decoding is blocked
+ * Creates a clean fallback canvas graphic if video decoding is completely unsupported or blocked
  */
 function createFallbackCanvas(label: string = 'Video'): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
@@ -63,7 +63,7 @@ export async function extractVideoFrame(
     return videoSource;
   }
 
-  // 2. If an active playing HTMLVideoElement is passed (Snap Frame)
+  // 2. If an active playing/loaded HTMLVideoElement is passed (e.g. Snap Frame)
   if (typeof HTMLVideoElement !== 'undefined' && videoSource instanceof HTMLVideoElement) {
     if (videoSource.videoWidth > 0 && videoSource.videoHeight > 0) {
       try {
@@ -73,7 +73,6 @@ export async function extractVideoFrame(
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) {
           ctx.drawImage(videoSource, 0, 0, canvas.width, canvas.height);
-          // Verify canvas is readable and untainted
           canvas.toDataURL('image/jpeg', 0.1);
           return canvas;
         }
@@ -105,30 +104,64 @@ export async function extractVideoFrame(
     return createFallbackCanvas(labelFallback);
   }
 
-  // 4. Create an offscreen video element to seek and capture the exact frame
+  // 4. Create an offscreen video element attached to DOM to ensure hardware frame rendering
   return new Promise((resolve) => {
     const video = document.createElement('video');
-    video.crossOrigin = 'anonymous';
-    video.preload = 'auto';
+    
+    // Only apply anonymous crossOrigin to remote network URLs (DO NOT apply to blob: URLs)
+    const isNetworkUrl = videoUrl.startsWith('http://') || videoUrl.startsWith('https://');
+    if (isNetworkUrl) {
+      video.crossOrigin = 'anonymous';
+    }
+
     video.muted = true;
     video.playsInline = true;
+    video.preload = 'auto';
     video.autoplay = false;
 
+    // Attach offscreen in DOM so the browser's video decoder pipeline allocates hardware frame buffer
+    video.style.position = 'fixed';
+    video.style.top = '-9999px';
+    video.style.left = '-9999px';
+    video.style.width = '320px';
+    video.style.height = '180px';
+    video.style.opacity = '0';
+    video.style.pointerEvents = 'none';
+
+    try {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.appendChild(video);
+      }
+    } catch {}
+
+    let checkInterval: NodeJS.Timeout | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
     let resolved = false;
-    let hasSeeked = false;
+    let hasAttemptedSeek = false;
 
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
-      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      if (checkInterval) clearInterval(checkInterval);
+
+      video.removeEventListener('loadedmetadata', handleMetadata);
       video.removeEventListener('loadeddata', handleLoadedData);
       video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('seeked', handleSeeked);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('error', handleError);
+
+      try {
+        if (video.parentNode) {
+          video.parentNode.removeChild(video);
+        }
+      } catch {}
+
       if (isBlobUrl) {
-        URL.revokeObjectURL(videoUrl);
+        try {
+          URL.revokeObjectURL(videoUrl);
+        } catch {}
       }
+
       video.pause();
       video.removeAttribute('src');
       video.load();
@@ -136,8 +169,10 @@ export async function extractVideoFrame(
 
     const tryCaptureFrame = (): boolean => {
       if (resolved) return true;
+      if (!video.videoWidth || !video.videoHeight) return false;
+      if (video.readyState < 2) return false;
+
       try {
-        if (!video.videoWidth || !video.videoHeight) return false;
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -145,8 +180,21 @@ export async function extractVideoFrame(
         if (!ctx) return false;
 
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
         // Test export to make sure it's valid & untainted
-        canvas.toDataURL('image/jpeg', 0.1);
+        const testData = canvas.toDataURL('image/jpeg', 0.1);
+        if (!testData || testData.length < 50) return false;
+
+        // Sample pixels to verify non-transparent
+        const imgData = ctx.getImageData(0, 0, Math.min(canvas.width, 16), Math.min(canvas.height, 16));
+        let hasPixels = false;
+        for (let i = 3; i < imgData.data.length; i += 4) {
+          if (imgData.data[i] > 0) {
+            hasPixels = true;
+            break;
+          }
+        }
+        if (!hasPixels) return false;
 
         resolved = true;
         cleanup();
@@ -158,52 +206,86 @@ export async function extractVideoFrame(
       }
     };
 
-    const handleSeeked = () => {
-      if (tryCaptureFrame()) return;
-      // Allow video decoder a frame tick
-      setTimeout(() => {
-        if (!tryCaptureFrame() && !resolved) {
-          resolved = true;
-          cleanup();
-          resolve(createFallbackCanvas(labelFallback));
+    const seekToTarget = () => {
+      if (hasAttemptedSeek && video.currentTime > 0) return;
+      hasAttemptedSeek = true;
+
+      const dur = video.duration;
+      let seekTime = timestamp;
+
+      if (dur && !isNaN(dur) && dur > 0) {
+        if (dur >= timestamp) {
+          seekTime = timestamp;
+        } else if (dur > 2) {
+          // Proportional fallback for short videos
+          seekTime = Math.max(0.5, dur * 0.25);
+        } else {
+          seekTime = Math.max(0.1, dur * 0.1);
         }
-      }, 50);
-    };
+      } else {
+        seekTime = Math.min(5, timestamp);
+      }
 
-    const handleTimeUpdate = () => {
-      if (hasSeeked && video.readyState >= 2) {
+      try {
+        video.currentTime = seekTime;
+      } catch {
         tryCaptureFrame();
       }
     };
 
-    const handleCanPlay = () => {
-      if (hasSeeked && video.readyState >= 2) {
-        tryCaptureFrame();
-      }
+    const handleMetadata = () => {
+      seekToTarget();
     };
 
     const handleLoadedData = () => {
-      if (video.readyState >= 2 && !hasSeeked && timestamp <= 0.5) {
-        tryCaptureFrame();
+      if (!hasAttemptedSeek) {
+        seekToTarget();
       }
+      tryCaptureFrame();
     };
 
-    const handleLoadedMetadata = () => {
-      const duration = video.duration || 0;
-      let targetTime = timestamp;
-
-      if (duration > 0) {
-        if (targetTime > duration) {
-          targetTime = Math.max(0.1, duration - 0.5);
-        } else if (targetTime <= 0) {
-          targetTime = Math.min(1, duration * 0.1);
-        }
+    const handleCanPlay = () => {
+      if (!hasAttemptedSeek) {
+        seekToTarget();
       }
+      tryCaptureFrame();
+    };
 
-      hasSeeked = true;
-      try {
-        video.currentTime = targetTime;
-      } catch {
+    const handleSeeked = () => {
+      if (tryCaptureFrame()) return;
+      
+      // Actively poll for up to 3 seconds while hardware frame buffer populates
+      let pollCount = 0;
+      if (checkInterval) clearInterval(checkInterval);
+      checkInterval = setInterval(() => {
+        pollCount++;
+        if (tryCaptureFrame() || pollCount > 30) {
+          if (checkInterval) clearInterval(checkInterval);
+          if (!resolved && pollCount > 30) {
+            // Nudge playback once to force hardware render
+            video.play().then(() => {
+              video.pause();
+              setTimeout(() => {
+                if (!tryCaptureFrame() && !resolved) {
+                  resolved = true;
+                  cleanup();
+                  resolve(createFallbackCanvas(labelFallback));
+                }
+              }, 100);
+            }).catch(() => {
+              if (!resolved) {
+                resolved = true;
+                cleanup();
+                resolve(createFallbackCanvas(labelFallback));
+              }
+            });
+          }
+        }
+      }, 100);
+    };
+
+    const handleTimeUpdate = () => {
+      if (hasAttemptedSeek && video.readyState >= 2) {
         tryCaptureFrame();
       }
     };
@@ -211,7 +293,7 @@ export async function extractVideoFrame(
     const handleError = () => {
       if (resolved) return;
       console.warn('Video frame capture error event on video element');
-      // If anonymous CORS failed, try without crossOrigin as fallback
+      // If anonymous CORS failed on network URL, retry without crossOrigin
       if (video.crossOrigin) {
         video.removeAttribute('crossorigin');
         video.src = videoUrl;
@@ -223,7 +305,7 @@ export async function extractVideoFrame(
       resolve(createFallbackCanvas(labelFallback));
     };
 
-    // Safety timeout: 10s
+    // Overall 12-second safety timeout
     timeoutId = setTimeout(() => {
       if (resolved) return;
       if (!tryCaptureFrame()) {
@@ -231,9 +313,9 @@ export async function extractVideoFrame(
         cleanup();
         resolve(createFallbackCanvas(labelFallback));
       }
-    }, 10000);
+    }, 12000);
 
-    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('loadedmetadata', handleMetadata);
     video.addEventListener('loadeddata', handleLoadedData);
     video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('seeked', handleSeeked);
