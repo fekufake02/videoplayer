@@ -10,8 +10,6 @@ import { secureStreamHeaders } from './middleware/secureHeaders';
 import { streamValidation } from './middleware/streamValidation';
 import routes from './routes';
 
-import { b2Service } from './services/b2Service';
-
 const app = express();
 
 // Enable trust proxy for Render / Vercel proxy headers
@@ -112,8 +110,6 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`My Vault Backend running on port ${port}`);
     connectDB().then(async () => {
       await ensureAdminUser();
-      await b2Service.ensureCors('account1');
-      await b2Service.ensureCors('account2');
     }).catch((err) => {
       console.error('DB init warning:', err);
     });

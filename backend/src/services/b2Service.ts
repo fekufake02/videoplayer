@@ -108,7 +108,6 @@ class B2Service {
     expiresInSeconds: number = 900,
     storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
-    await this.ensureCors(storageAccount);
     const { client, bucketName } = this.getClientAndBucket(storageAccount);
     const command = new PutObjectCommand({
       Bucket: bucketName,
@@ -127,7 +126,6 @@ class B2Service {
     contentType: string,
     storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
-    await this.ensureCors(storageAccount);
     const { client, bucketName } = this.getClientAndBucket(storageAccount);
     const result = await client.send(
       new CreateMultipartUploadCommand({
