@@ -204,9 +204,19 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const xhr = new XMLHttpRequest();
       xhrMap.current.set(id, xhr);
 
+      let lastStateUpdate = 0;
+
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
           const currentUploaded = e.loaded;
+          const now = Date.now();
+
+          // Throttle React state re-renders to every 150ms to keep main thread light
+          if (now - lastStateUpdate < 150 && currentUploaded < totalBytes) {
+            return;
+          }
+          lastStateUpdate = now;
+
           const progress = Math.min(99, Math.round((currentUploaded / totalBytes) * 100));
           const { speed, etaSeconds } = calculateSpeedAndEta(id, currentUploaded, totalBytes);
 
