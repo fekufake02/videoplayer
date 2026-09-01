@@ -123,7 +123,7 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
             (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
               v.thumbnailKey,
               3600,
-              v.storageAccount || 'account1'
+              v.storageAccount || 'account2'
             );
           } catch (e) {}
         }
@@ -363,7 +363,7 @@ export const getVideoDetails = async (req: AuthenticatedRequest, res: Response):
         (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
           video.thumbnailKey,
           3600,
-          video.storageAccount || 'account1'
+          video.storageAccount || 'account2'
         );
       } catch (e) {}
     }
@@ -466,17 +466,25 @@ export const getStreamUrl = async (req: AuthenticatedRequest, res: Response): Pr
       return;
     }
 
-    const streamUrl = await b2Service.getPresignedStreamUrl(
-      video.storageKey,
-      900,
-      video.storageAccount || 'account1',
-      video.mimeType || 'video/mp4'
-    );
+    // Smart Storage Account Check: default to account2 for new uploads, fallback to account1 if object is legacy
+    let accountToUse: StorageAccount = video.storageAccount || 'account2';
+    const existsInTarget = await b2Service.checkObjectExists(video.storageKey, accountToUse);
+    if (!existsInTarget) {
+      const altAccount: StorageAccount = accountToUse === 'account2' ? 'account1' : 'account2';
+      const existsInAlt = await b2Service.checkObjectExists(video.storageKey, altAccount);
+      if (existsInAlt) {
+        accountToUse = altAccount;
+        video.storageAccount = altAccount;
+        await video.save().catch(() => {});
+      }
+    }
+
+    const streamUrl = await b2Service.getPresignedStreamUrl(video.storageKey, 900, accountToUse);
     let thumbnailUrl: string | undefined = undefined;
 
     if (video.thumbnailKey) {
       try {
-        thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600, video.storageAccount || 'account1');
+        thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600, accountToUse);
       } catch (e) {}
     }
 

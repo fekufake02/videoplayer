@@ -238,15 +238,12 @@ class B2Service {
   async getPresignedStreamUrl(
     storageKey: string,
     expiresInSeconds: number = 900,
-    storageAccount: StorageAccount = 'account2',
-    contentType?: string
+    storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
     const { client, bucketName } = this.getClientAndBucket(storageAccount);
-    const mime = contentType || (storageKey.endsWith('.webp') ? 'image/webp' : 'video/mp4');
     const command = new GetObjectCommand({
       Bucket: bucketName,
       Key: storageKey,
-      ResponseContentType: mime,
     });
     return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
   }
