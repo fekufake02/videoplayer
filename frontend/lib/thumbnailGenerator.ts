@@ -338,7 +338,8 @@ export interface ThumbnailGenerationResult {
 export async function generateAndUploadThumbnail(
   videoSource: string | File | Blob | HTMLVideoElement | HTMLCanvasElement,
   originalFilename: string,
-  timestamp: number = 15
+  timestamp: number = 15,
+  videoId?: string
 ): Promise<ThumbnailGenerationResult | null> {
   try {
     // Extract frame from video with safe fallback
@@ -365,6 +366,7 @@ export async function generateAndUploadThumbnail(
       filename: `${safeBaseName}_thumb.webp`,
       mimeType: 'image/webp',
       size: blob.size,
+      videoId,
     });
 
     if (!uploadRes || !uploadRes.uploadUrl || !uploadRes.storageKey) {
@@ -390,8 +392,9 @@ export async function generateAndUploadThumbnail(
       const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
       const headers: Record<string, string> = { 'Content-Type': 'image/webp' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      const targetAccount = (uploadRes as any).storageAccount || 'account2';
 
-      await fetch(`${backendBase}/videos/upload/proxy?key=${encodeURIComponent(uploadRes.storageKey)}&storageAccount=account2`, {
+      await fetch(`${backendBase}/videos/upload/proxy?key=${encodeURIComponent(uploadRes.storageKey)}&storageAccount=${targetAccount}`, {
         method: 'PUT',
         headers,
         body: blob,
@@ -451,7 +454,7 @@ export async function reprocessSingleVideoThumbnail(
       source = streamUrl;
     }
 
-    const result = await generateAndUploadThumbnail(source, originalFilename, timestamp);
+    const result = await generateAndUploadThumbnail(source, originalFilename, timestamp, videoId);
     if (!result?.thumbnailKey) {
       throw new Error('Thumbnail upload could not be completed.');
     }

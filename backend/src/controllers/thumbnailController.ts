@@ -27,16 +27,25 @@ export const initiateThumbnailUpload = async (
     const videoId = parsed.success && parsed.data.videoId ? parsed.data.videoId : crypto.randomBytes(8).toString('hex');
     const randomUuid = crypto.randomUUID();
 
+    let targetAccount: 'account1' | 'account2' = 'account2';
+    if (parsed.success && parsed.data.videoId) {
+      const existingVideo = await Video.findById(parsed.data.videoId);
+      if (existingVideo && existingVideo.storageAccount) {
+        targetAccount = existingVideo.storageAccount;
+      }
+    }
+
     const rawExt = path.extname(filename) || '.webp';
     const safeExt = rawExt.replace(/[^a-zA-Z0-9.]/g, '');
     const storageKey = `thumbnails/${videoId}/${randomUuid}${safeExt}`;
 
-    const uploadUrl = await b2Service.getPresignedUploadUrl(storageKey, mimeType);
+    const uploadUrl = await b2Service.getPresignedUploadUrl(storageKey, mimeType, 900, targetAccount);
 
     res.status(200).json({
       success: true,
       uploadUrl,
       storageKey,
+      storageAccount: targetAccount,
       videoId,
     });
   } catch (error) {
@@ -129,7 +138,7 @@ export const getThumbnailUrl = async (
   try {
     const { id } = req.params;
 
-    const video = await Video.findById(id).select('thumbnailKey');
+    const video = await Video.findById(id).select('thumbnailKey storageAccount');
     if (!video || !video.thumbnailKey) {
       res.status(404).json({
         success: false,
@@ -138,7 +147,8 @@ export const getThumbnailUrl = async (
       return;
     }
 
-    const thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600); // 1 hour
+    const accountToUse = video.storageAccount || 'account1';
+    const thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600, accountToUse);
 
     res.status(200).json({
       success: true,

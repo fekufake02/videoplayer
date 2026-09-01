@@ -327,6 +327,15 @@ export const attachThumbnail = async (req: AuthenticatedRequest, res: Response):
       return;
     }
 
+    // Automatically delete older thumbnail from B2 storage account to save space
+    if (video.thumbnailKey && video.thumbnailKey !== thumbnailKey) {
+      const accountToUse = video.storageAccount || 'account1';
+      console.log(`Deleting previous thumbnail (${video.thumbnailKey}) from B2 ${accountToUse}...`);
+      b2Service.deleteObject(video.thumbnailKey, accountToUse).catch((err) => {
+        console.warn('Failed to delete old thumbnail from B2:', err);
+      });
+    }
+
     video.thumbnailKey = thumbnailKey;
     if (blurhash && typeof blurhash === 'string') {
       video.blurhash = blurhash;
