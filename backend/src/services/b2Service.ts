@@ -5,6 +5,10 @@ import {
   HeadObjectCommand,
   DeleteObjectCommand,
   PutBucketCorsCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config';
@@ -55,7 +59,7 @@ class B2Service {
               accessKeyId: cfg.accessKeyId,
               secretAccessKey: cfg.secretAccessKey,
             },
-            forcePathStyle: false,
+            forcePathStyle: true,
             requestChecksumCalculation: 'WHEN_REQUIRED',
             responseChecksumValidation: 'WHEN_REQUIRED',
           });
@@ -76,7 +80,7 @@ class B2Service {
             accessKeyId: config.b2.accessKeyId,
             secretAccessKey: config.b2.secretAccessKey,
           },
-          forcePathStyle: false,
+          forcePathStyle: true,
           requestChecksumCalculation: 'WHEN_REQUIRED',
           responseChecksumValidation: 'WHEN_REQUIRED',
         });
@@ -96,7 +100,7 @@ class B2Service {
   }
 
   /**
-   * Generates a short-lived presigned PUT URL for direct browser upload
+   * Generates a short-lived presigned PUT URL for direct browser upload (small files)
    */
   async getPresignedUploadUrl(
     storageKey: string,
@@ -111,6 +115,98 @@ class B2Service {
       Key: storageKey,
     });
     return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+  }
+
+  // ── Multipart Upload (for large files with parallel chunks) ──
+
+  /**
+   * Initiates an S3 multipart upload and returns the uploadId
+   */
+  async createMultipartUpload(
+    storageKey: string,
+    contentType: string,
+    storageAccount: StorageAccount = 'account2'
+  ): Promise<string> {
+    await this.ensureCors(storageAccount);
+    const { client, bucketName } = this.getClientAndBucket(storageAccount);
+    const result = await client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: bucketName,
+        Key: storageKey,
+        ContentType: contentType,
+      })
+    );
+    if (!result.UploadId) throw new Error('Failed to initiate multipart upload');
+    return result.UploadId;
+  }
+
+  /**
+   * Generates presigned URLs for individual part uploads
+   */
+  async getPartUploadUrls(
+    storageKey: string,
+    uploadId: string,
+    totalParts: number,
+    expiresInSeconds: number = 3600,
+    storageAccount: StorageAccount = 'account2'
+  ): Promise<{ partNumber: number; uploadUrl: string }[]> {
+    const { client, bucketName } = this.getClientAndBucket(storageAccount);
+    const urls: { partNumber: number; uploadUrl: string }[] = [];
+
+    for (let i = 1; i <= totalParts; i++) {
+      const command = new UploadPartCommand({
+        Bucket: bucketName,
+        Key: storageKey,
+        UploadId: uploadId,
+        PartNumber: i,
+      });
+      const url = await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+      urls.push({ partNumber: i, uploadUrl: url });
+    }
+
+    return urls;
+  }
+
+  /**
+   * Completes a multipart upload by assembling all parts
+   */
+  async completeMultipartUpload(
+    storageKey: string,
+    uploadId: string,
+    parts: { PartNumber: number; ETag: string }[],
+    storageAccount: StorageAccount = 'account2'
+  ): Promise<void> {
+    const { client, bucketName } = this.getClientAndBucket(storageAccount);
+    await client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: bucketName,
+        Key: storageKey,
+        UploadId: uploadId,
+        MultipartUpload: { Parts: parts },
+      })
+    );
+  }
+
+  /**
+   * Aborts a multipart upload (cleanup on failure)
+   */
+  async abortMultipartUpload(
+    storageKey: string,
+    uploadId: string,
+    storageAccount: StorageAccount = 'account2'
+  ): Promise<void> {
+    try {
+      const { client, bucketName } = this.getClientAndBucket(storageAccount);
+      await client.send(
+        new AbortMultipartUploadCommand({
+          Bucket: bucketName,
+          Key: storageKey,
+          UploadId: uploadId,
+        })
+      );
+    } catch (err) {
+      console.warn('Failed to abort multipart upload:', err);
+    }
   }
 
   /**
