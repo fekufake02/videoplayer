@@ -191,17 +191,14 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   /**
-   * Uploads a single chunk of the file with byte range
+   * Uploads the full video file in a single, smooth, continuous stream
    */
-  const uploadChunk = async (
+  const uploadSingleFile = async (
     task: UploadTask,
     storageKey: string,
-    uploadUrl: string,
-    startByte: number
-  ): Promise<{ nextOffset: number; isComplete: boolean }> => {
-    const { file, totalBytes, chunkSize, id } = task;
-    const endByte = Math.min(startByte + chunkSize, totalBytes);
-    const chunkBlob = file.slice(startByte, endByte);
+    uploadUrl: string
+  ): Promise<void> => {
+    const { file, totalBytes, id } = task;
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -209,7 +206,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
-          const currentUploaded = startByte + e.loaded;
+          const currentUploaded = e.loaded;
           const progress = Math.min(99, Math.round((currentUploaded / totalBytes) * 100));
           const { speed, etaSeconds } = calculateSpeedAndEta(id, currentUploaded, totalBytes);
 
@@ -222,7 +219,6 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     progress,
                     speed,
                     etaSeconds,
-                    currentChunkIndex: Math.floor(currentUploaded / chunkSize) + 1,
                   }
                 : t
             )
@@ -233,16 +229,15 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       xhr.onload = () => {
         xhrMap.current.delete(id);
         if (xhr.status >= 200 && xhr.status < 300) {
-          const isComplete = endByte >= totalBytes;
-          resolve({ nextOffset: endByte, isComplete });
+          resolve();
         } else {
-          reject(new Error(`Server returned HTTP ${xhr.status} on chunk upload`));
+          reject(new Error(`Server returned HTTP ${xhr.status} on file upload`));
         }
       };
 
       xhr.onerror = () => {
         xhrMap.current.delete(id);
-        reject(new Error('Network error during chunk transmission'));
+        reject(new Error('Network error during file upload transmission'));
       };
 
       xhr.onabort = () => {
@@ -250,12 +245,10 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         reject(new Error('UPLOAD_ABORTED_BY_USER'));
       };
 
-      // Direct URL or receiver URL with Content-Range
       const targetUrl = uploadUrl || `/api/upload-receiver?key=${encodeURIComponent(storageKey)}`;
       xhr.open('PUT', targetUrl, true);
       xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
-      xhr.setRequestHeader('Content-Range', `bytes ${startByte}-${endByte - 1}/${totalBytes}`);
-      xhr.send(chunkBlob);
+      xhr.send(file);
     });
   };
 
@@ -310,41 +303,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         );
       }
 
-      // Step 2: Check server resume status to get the exact verified byte offset
-      let currentOffset = task.uploadedBytes || 0;
-      try {
-        const statusRes = await api.getUploadStatus(storageKey);
-        if (statusRes && statusRes.exists && statusRes.uploadedBytes > currentOffset) {
-          currentOffset = statusRes.uploadedBytes;
-        }
-      } catch {}
-
-      // Step 3: Loop and transmit remaining chunks
-      while (currentOffset < task.totalBytes) {
-        if (isPausedByUser.current.get(taskId)) {
-          setTasks((prev) =>
-            prev.map((t) => (t.id === taskId ? { ...t, status: 'paused', speed: 0 } : t))
-          );
-          return;
-        }
-
-        const chunkResult = await uploadChunk(task, storageKey, uploadUrl, currentOffset);
-        currentOffset = chunkResult.nextOffset;
-
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === taskId
-              ? {
-                  ...t,
-                  uploadedBytes: currentOffset,
-                  progress: Math.min(99, Math.round((currentOffset / t.totalBytes) * 100)),
-                }
-              : t
-          )
-        );
-
-        if (chunkResult.isComplete) break;
-      }
+      // Step 2: Upload file smoothly in a single continuous stream
+      await uploadSingleFile(task, storageKey, uploadUrl);
 
       // Step 4: Finalize Thumbnail & Video registration
       let thumbnailKey = task.thumbnailKey;

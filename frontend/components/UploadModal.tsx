@@ -124,14 +124,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-extrabold text-white tracking-tight">
-                  Resumable Media Uploader
+                  Smooth Media Uploader
                 </h3>
-                <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-[10px] font-semibold text-indigo-300">
-                  Chunked 4MB
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[10px] font-semibold text-emerald-300">
+                  Smooth Stream
                 </span>
               </div>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Background-active • Automatic retry on network drops • Resumes from failed byte
+                Background-active • Automatic retry on network drops • Zero pauses
               </p>
             </div>
           </div>
