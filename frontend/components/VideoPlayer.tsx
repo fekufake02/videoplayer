@@ -189,12 +189,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   // Handle Video Metadata Loaded
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      if (videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
+      if (videoRef.current.duration && isFinite(videoRef.current.duration) && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
         const d = videoRef.current.duration;
         setDuration(d);
         if ((!video.duration || video.duration === 0) && video._id) {
           api.updateVideoMetadata(video._id, { title: video.title }).catch(() => {});
         }
+      } else if (video.duration && isFinite(video.duration) && video.duration > 0) {
+        setDuration(video.duration);
       }
       videoRef.current.volume = isMuted ? 0 : volume;
       videoRef.current.playbackRate = playbackSpeed;
@@ -204,11 +206,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       }
       setIsMediaReady(true);
       setIsWaiting(false);
+      setHasPlaybackError(false);
     }
   };
 
   useEffect(() => {
-    if (video.duration && video.duration > 0) {
+    if (video.duration && isFinite(video.duration) && video.duration > 0) {
       setDuration(video.duration);
     }
   }, [video.duration]);
@@ -216,6 +219,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const handleMediaReady = () => {
     setIsMediaReady(true);
     setIsWaiting(false);
+    setHasPlaybackError(false);
   };
 
   // Always pause playback immediately on tab switch or window minimize
@@ -334,9 +338,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   }, []);
 
   const handleDirectSeek = (newTime: number) => {
-    const safeTime = Math.max(0, Math.min(duration || 0, newTime));
+    const safeDuration = (duration && isFinite(duration) && duration > 0) ? duration : (video.duration || 0);
+    const safeTime = safeDuration > 0
+      ? Math.max(0, Math.min(safeDuration, newTime))
+      : Math.max(0, newTime);
     setCurrentTime(safeTime);
-    if (videoRef.current) {
+
+    if (mpegtsPlayerRef.current) {
+      try {
+        mpegtsPlayerRef.current.currentTime = safeTime;
+      } catch (e) {
+        if (videoRef.current) videoRef.current.currentTime = safeTime;
+      }
+    } else if (videoRef.current) {
       videoRef.current.currentTime = safeTime;
     }
     resetControlsTimeout();
@@ -345,13 +359,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   // Skip Control (-10, +10)
   const skip = useCallback(
     (seconds: number) => {
-      if (!videoRef.current) return;
-      const target = Math.max(0, Math.min(duration, videoRef.current.currentTime + seconds));
-      videoRef.current.currentTime = target;
+      const current = (mpegtsPlayerRef.current?.currentTime && isFinite(mpegtsPlayerRef.current.currentTime))
+        ? mpegtsPlayerRef.current.currentTime
+        : (videoRef.current?.currentTime || currentTime || 0);
+
+      const safeDuration = (duration && isFinite(duration) && duration > 0) ? duration : (video.duration || 0);
+      const target = safeDuration > 0
+        ? Math.max(0, Math.min(safeDuration, current + seconds))
+        : Math.max(0, current + seconds);
+
       setCurrentTime(target);
+      if (mpegtsPlayerRef.current) {
+        try {
+          mpegtsPlayerRef.current.currentTime = target;
+        } catch (e) {
+          if (videoRef.current) videoRef.current.currentTime = target;
+        }
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = target;
+      }
       resetControlsTimeout();
     },
-    [duration, resetControlsTimeout]
+    [duration, video.duration, currentTime, resetControlsTimeout]
   );
 
   // Volume Adjustment
@@ -757,13 +786,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   };
 
   const formatTime = (secs: number) => {
-    const hrs = Math.floor(secs / 3600);
-    const mins = Math.floor((secs % 3600) / 60);
-    const s = Math.floor(secs % 60);
-    if (hrs > 0) {
-      return `${hrs}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    let s = secs;
+    if (typeof s !== 'number' || !isFinite(s) || isNaN(s) || s < 0) {
+      if (video.duration && isFinite(video.duration) && video.duration > 0) {
+        s = video.duration;
+      } else {
+        return '00:00';
+      }
     }
-    return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    const hrs = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
   const resumePositionFormatted = formatTime(video.lastPosition || 0);

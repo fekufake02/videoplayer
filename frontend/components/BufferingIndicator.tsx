@@ -34,10 +34,14 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
 
   // Active display time is scrubTime if user is actively dragging/sliding, otherwise currentTime
   const displayTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
-  const playedPercent = Math.min(100, Math.max(0, (displayTime / duration) * 100));
+  const safeDuration = (duration && isFinite(duration) && duration > 0) ? duration : 0;
+  const playedPercent = safeDuration > 0 ? Math.min(100, Math.max(0, (displayTime / safeDuration) * 100)) : 0;
 
   const formatTime = (secs: number) => {
-    const safeSecs = Math.max(0, Math.min(duration, secs));
+    if (typeof secs !== 'number' || !isFinite(secs) || isNaN(secs) || secs < 0) {
+      return '00:00';
+    }
+    const safeSecs = safeDuration > 0 ? Math.max(0, Math.min(safeDuration, secs)) : Math.max(0, secs);
     const hrs = Math.floor(safeSecs / 3600);
     const mins = Math.floor((safeSecs % 3600) / 60);
     const s = Math.floor(safeSecs % 60);
@@ -92,7 +96,6 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
       setScrubTime(moveTime);
       setHoverPosition(movePos);
       setHoverTime(moveTime);
-      onSeek(moveTime);
     };
 
     const onGlobalMouseUp = (upEvent: MouseEvent) => {
@@ -119,7 +122,6 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     setScrubTime(time);
     setHoverPosition(pos);
     setHoverTime(time);
-    onSeek(time);
 
     const onGlobalTouchMove = (moveEvent: TouchEvent) => {
       if (moveEvent.touches.length === 0) return;
@@ -128,7 +130,6 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
       setScrubTime(moveTime);
       setHoverPosition(movePos);
       setHoverTime(moveTime);
-      onSeek(moveTime);
     };
 
     const onGlobalTouchEnd = (endEvent: TouchEvent) => {
