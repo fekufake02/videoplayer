@@ -8,32 +8,39 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config';
 
+export type StorageAccount = 'account1' | 'account2';
+
 class B2Service {
-  private client: S3Client | null = null;
+  private client1: S3Client | null = null;
+  private client2: S3Client | null = null;
 
-  constructor() {
-    if (config.b2.accessKeyId && config.b2.secretAccessKey && config.b2.endpoint) {
-      this.client = new S3Client({
-        endpoint: config.b2.endpoint,
-        region: config.b2.region,
-        credentials: {
-          accessKeyId: config.b2.accessKeyId,
-          secretAccessKey: config.b2.secretAccessKey,
-        },
-        forcePathStyle: true,
-        requestChecksumCalculation: 'WHEN_REQUIRED',
-        responseChecksumValidation: 'WHEN_REQUIRED',
-      });
-    } else {
-      console.warn('Backblaze B2 credentials not fully set. B2 Service will operate in fallback mode.');
+  private getClientAndBucket(storageAccount: StorageAccount = 'account2'): { client: S3Client; bucketName: string } {
+    if (storageAccount === 'account1') {
+      const cfg = config.b2.account1;
+      if (!this.client1) {
+        if (cfg.accessKeyId && cfg.secretAccessKey && cfg.endpoint) {
+          this.client1 = new S3Client({
+            endpoint: cfg.endpoint,
+            region: cfg.region,
+            credentials: {
+              accessKeyId: cfg.accessKeyId,
+              secretAccessKey: cfg.secretAccessKey,
+            },
+            forcePathStyle: true,
+            requestChecksumCalculation: 'WHEN_REQUIRED',
+            responseChecksumValidation: 'WHEN_REQUIRED',
+          });
+        }
+      }
+      if (this.client1) {
+        return { client: this.client1, bucketName: cfg.bucketName };
+      }
     }
-  }
 
-  private getClient(): S3Client {
-    if (!this.client) {
-      // Re-check config in case env vars were set dynamically
+    // Default: Account 2 (New Uploads)
+    if (!this.client2) {
       if (config.b2.accessKeyId && config.b2.secretAccessKey && config.b2.endpoint) {
-        this.client = new S3Client({
+        this.client2 = new S3Client({
           endpoint: config.b2.endpoint,
           region: config.b2.region,
           credentials: {
@@ -44,11 +51,19 @@ class B2Service {
           requestChecksumCalculation: 'WHEN_REQUIRED',
           responseChecksumValidation: 'WHEN_REQUIRED',
         });
-        return this.client;
       }
-      throw new Error('B2 credentials missing in server environment.');
     }
-    return this.client;
+
+    if (this.client2) {
+      return { client: this.client2, bucketName: config.b2.bucketName };
+    }
+
+    // Fallback if client1 is configured
+    if (this.client1) {
+      return { client: this.client1, bucketName: config.b2.account1.bucketName };
+    }
+
+    throw new Error('B2 credentials missing in server environment.');
   }
 
   /**
@@ -57,11 +72,12 @@ class B2Service {
   async getPresignedUploadUrl(
     storageKey: string,
     contentType: string,
-    expiresInSeconds: number = 900
+    expiresInSeconds: number = 900,
+    storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
-    const client = this.getClient();
+    const { client, bucketName } = this.getClientAndBucket(storageAccount);
     const command = new PutObjectCommand({
-      Bucket: config.b2.bucketName,
+      Bucket: bucketName,
       Key: storageKey,
     });
     return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
@@ -70,11 +86,14 @@ class B2Service {
   /**
    * Verifies if an object exists on B2
    */
-  async checkObjectExists(storageKey: string): Promise<boolean> {
+  async checkObjectExists(
+    storageKey: string,
+    storageAccount: StorageAccount = 'account2'
+  ): Promise<boolean> {
     try {
-      const client = this.getClient();
+      const { client, bucketName } = this.getClientAndBucket(storageAccount);
       const command = new HeadObjectCommand({
-        Bucket: config.b2.bucketName,
+        Bucket: bucketName,
         Key: storageKey,
       });
       await client.send(command);
@@ -83,8 +102,6 @@ class B2Service {
       if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
         return false;
       }
-      // If server-side connection to B2 experiences network latency/timeouts,
-      // log warning and return true so upload completion registers metadata smoothly.
       console.warn(`checkObjectExists network warning for ${storageKey}:`, error.message || error);
       return true;
     }
@@ -95,11 +112,12 @@ class B2Service {
    */
   async getPresignedStreamUrl(
     storageKey: string,
-    expiresInSeconds: number = 900
+    expiresInSeconds: number = 900,
+    storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
-    const client = this.getClient();
+    const { client, bucketName } = this.getClientAndBucket(storageAccount);
     const command = new GetObjectCommand({
-      Bucket: config.b2.bucketName,
+      Bucket: bucketName,
       Key: storageKey,
     });
     return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
@@ -111,12 +129,13 @@ class B2Service {
   async getPresignedDownloadUrl(
     storageKey: string,
     originalFilename: string,
-    expiresInSeconds: number = 900
+    expiresInSeconds: number = 900,
+    storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
-    const client = this.getClient();
+    const { client, bucketName } = this.getClientAndBucket(storageAccount);
     const safeFilename = encodeURIComponent(originalFilename.replace(/["\r\n]/g, ''));
     const command = new GetObjectCommand({
-      Bucket: config.b2.bucketName,
+      Bucket: bucketName,
       Key: storageKey,
       ResponseContentDisposition: `attachment; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`,
     });
@@ -126,17 +145,19 @@ class B2Service {
   /**
    * Permanently deletes object from B2
    */
-  async deleteObject(storageKey: string): Promise<void> {
+  async deleteObject(
+    storageKey: string,
+    storageAccount: StorageAccount = 'account2'
+  ): Promise<void> {
     try {
-      const client = this.getClient();
+      const { client, bucketName } = this.getClientAndBucket(storageAccount);
       const command = new DeleteObjectCommand({
-        Bucket: config.b2.bucketName,
+        Bucket: bucketName,
         Key: storageKey,
       });
       await client.send(command);
     } catch (error) {
       console.error(`Error deleting object ${storageKey} from B2:`, error);
-      // Don't block DB deletion if file was already gone
     }
   }
 }

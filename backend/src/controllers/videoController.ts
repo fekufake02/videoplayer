@@ -120,7 +120,11 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
         const obj = v.toObject();
         if (v.thumbnailKey) {
           try {
-            (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(v.thumbnailKey, 3600);
+            (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
+              v.thumbnailKey,
+              3600,
+              v.storageAccount || 'account1'
+            );
           } catch (e) {}
         }
         return obj;
@@ -236,7 +240,7 @@ export const initiateUpload = async (req: AuthenticatedRequest, res: Response): 
       ? `thumbnails/${videoId}/${randomUuid}${safeExt}`
       : `videos/${videoId}/original/${randomUuid}${safeExt}`;
 
-    const uploadUrl = await b2Service.getPresignedUploadUrl(storageKey, mimeType);
+    const uploadUrl = await b2Service.getPresignedUploadUrl(storageKey, mimeType, 900, 'account2');
 
     res.status(200).json({
       success: true,
@@ -267,7 +271,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
     const { title, originalFilename, storageKey, thumbnailKey, blurhash, mimeType, size, duration, tags, notes } = parsed.data;
 
     // Verify file actually landed in Backblaze B2
-    const exists = await b2Service.checkObjectExists(storageKey);
+    const exists = await b2Service.checkObjectExists(storageKey, 'account2');
     if (!exists) {
       res.status(404).json({
         success: false,
@@ -280,6 +284,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
       title: title || originalFilename,
       originalFilename,
       storageKey,
+      storageAccount: 'account2',
       thumbnailKey: thumbnailKey || undefined,
       blurhash: blurhash || undefined,
       mimeType,
@@ -355,7 +360,11 @@ export const getVideoDetails = async (req: AuthenticatedRequest, res: Response):
     const obj = video.toObject();
     if (video.thumbnailKey) {
       try {
-        (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600);
+        (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
+          video.thumbnailKey,
+          3600,
+          video.storageAccount || 'account1'
+        );
       } catch (e) {}
     }
 
@@ -423,12 +432,12 @@ export const deleteVideo = async (req: AuthenticatedRequest, res: Response): Pro
 
     // Delete primary video file from B2
     if (video.storageKey) {
-      await b2Service.deleteObject(video.storageKey);
+      await b2Service.deleteObject(video.storageKey, video.storageAccount || 'account1');
     }
 
     // Delete thumbnail file from B2 if present
     if (video.thumbnailKey) {
-      await b2Service.deleteObject(video.thumbnailKey);
+      await b2Service.deleteObject(video.thumbnailKey, video.storageAccount || 'account1');
     }
 
     await Video.findByIdAndDelete(req.params.id);
@@ -457,12 +466,12 @@ export const getStreamUrl = async (req: AuthenticatedRequest, res: Response): Pr
       return;
     }
 
-    const streamUrl = await b2Service.getPresignedStreamUrl(video.storageKey, 900); // 15 min expiration
+    const streamUrl = await b2Service.getPresignedStreamUrl(video.storageKey, 900, video.storageAccount || 'account1');
     let thumbnailUrl: string | undefined = undefined;
 
     if (video.thumbnailKey) {
       try {
-        thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600); // 1 hr expiration
+        thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600, video.storageAccount || 'account1');
       } catch (e) {}
     }
 
@@ -494,7 +503,8 @@ export const getDownloadUrl = async (req: AuthenticatedRequest, res: Response): 
     const downloadUrl = await b2Service.getPresignedDownloadUrl(
       video.storageKey,
       video.originalFilename,
-      900
+      900,
+      video.storageAccount || 'account1'
     );
 
     res.status(200).json({
