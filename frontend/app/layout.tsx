@@ -10,6 +10,7 @@ import { UploadModal } from '../components/UploadModal';
 const outfit = Outfit({
   subsets: ['latin'],
   variable: '--font-outfit',
+  fallback: ['system-ui', 'sans-serif'],
 });
 
 export const metadata: Metadata = {

@@ -4,6 +4,8 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { IVideo } from '../types';
 import { api } from '../lib/api';
+import mpegts from 'mpegts.js';
+import Hls from 'hls.js';
 import { useBufferedSegments } from '../hooks/useBufferedSegments';
 import { BufferingIndicator } from './BufferingIndicator';
 import {
@@ -24,6 +26,8 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  AlertCircle,
+  Download,
   Rotate3d,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -68,7 +72,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   };
 
   const [activeSrc, setActiveSrc] = useState<string>(() => getReliableSource(streamUrl));
-  const [hasSwappedFallback, setHasSwappedFallback] = useState(false);
+  const mpegtsPlayerRef = useRef<any>(null);
+  const hlsPlayerRef = useRef<any>(null);
 
   useEffect(() => {
     if (streamUrl && streamUrl.trim().length > 0) {
@@ -253,53 +258,80 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     }
   }, []);
 
-  const handleVideoError = useCallback(() => {
+  const [hasPlaybackError, setHasPlaybackError] = useState(false);
+
+  const handleVideoError = useCallback((e?: any) => {
     setIsWaiting(false);
-    setIsMediaReady(true);
-    if (!hasSwappedFallback) {
-      setHasSwappedFallback(true);
-      console.warn('Video source error, switching to fallback stream:', reliableSample);
-      setActiveSrc(reliableSample);
-      if (videoRef.current) {
-        videoRef.current.src = reliableSample;
-        videoRef.current.load();
+
+    // Attempt mpegts.js demuxing fallback for MPEG-TS streams (.ts container disguised as mp4)
+    if (activeSrc && mpegts && mpegts.isSupported() && !mpegtsPlayerRef.current && videoRef.current) {
+      try {
+        console.log('Attempting mpegts.js demuxer fallback for MPEG-TS stream:', activeSrc);
+        const player = mpegts.createPlayer(
+          {
+            type: 'mse',
+            isLive: false,
+            url: activeSrc,
+          },
+          {
+            enableStashBuffer: false,
+            stashInitialSize: 128,
+            lazyLoadMaxDuration: 3 * 60,
+          }
+        );
+        player.attachMediaElement(videoRef.current);
+        player.load();
+        const res = player.play();
+        if (res && typeof (res as any).then === 'function') {
+          (res as Promise<void>).then(() => {
+            setIsPlaying(true);
+            setShowControls(true);
+          }).catch(() => {});
+        } else {
+          setIsPlaying(true);
+          setShowControls(true);
+        }
+
+        player.on(mpegts.Events.ERROR, (errType: string, errDetail: string) => {
+          console.warn('mpegts.js player error:', errType, errDetail);
+          setHasPlaybackError(true);
+        });
+
+        mpegtsPlayerRef.current = player;
+        setHasPlaybackError(false);
+        setIsMediaReady(true);
+        return;
+      } catch (err) {
+        console.warn('mpegts.js initialization failed:', err);
       }
     }
-  }, [hasSwappedFallback, reliableSample]);
+
+    setIsMediaReady(true);
+    setHasPlaybackError(true);
+    console.warn('HTML5 Video decoding error on source:', activeSrc, e);
+  }, [activeSrc]);
 
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      if (!videoRef.current.src || videoRef.current.src === '' || videoRef.current.src.endsWith('/undefined')) {
-        videoRef.current.src = activeSrc || reliableSample;
-      }
       videoRef.current
         .play()
         .then(() => {
           setIsPlaying(true);
           setShowControls(true);
+          setHasPlaybackError(false);
         })
         .catch((err) => {
           console.warn('Playback error:', err);
-          if (!hasSwappedFallback) {
-            handleVideoError();
-            setTimeout(() => {
-              if (videoRef.current) {
-                videoRef.current.play().then(() => {
-                  setIsPlaying(true);
-                  setShowControls(true);
-                }).catch(() => {});
-              }
-            }, 300);
-          }
+          setHasPlaybackError(true);
         });
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
       setShowControls(true);
     }
-  }, [activeSrc, reliableSample, hasSwappedFallback, handleVideoError]);
+  }, []);
 
   const handleDirectSeek = (newTime: number) => {
     const safeTime = Math.max(0, Math.min(duration || 0, newTime));
@@ -884,6 +916,46 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             </button>
           </div>
         )
+      )}
+
+      {/* Codec Error Overlay for HEVC / H.265 / Unsupported Browser Codec */}
+      {hasPlaybackError && (
+        <div className="absolute inset-0 z-45 bg-zinc-950/95 backdrop-blur-lg flex flex-col items-center justify-center p-4 text-center animate-fade-in pointer-events-auto">
+          <div className="max-w-md bg-zinc-900 border border-amber-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white mb-1">Codec Not Supported by Browser</h3>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                This video was encoded with <span className="text-amber-300 font-semibold">HEVC (H.265) / High Profile</span>, which desktop web browsers (Chrome/Brave) cannot decode inside HTML5. The file on B2 storage is 100% intact.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await api.getDownloadUrl(video._id);
+                    if (res.downloadUrl) {
+                      const a = document.createElement('a');
+                      a.href = res.downloadUrl;
+                      a.download = video.originalFilename;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }
+                  } catch (err) {
+                    console.error('Download error:', err);
+                  }
+                }}
+                className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-lg active:scale-95"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download & Play in VLC / Mobile</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Minimal 2-Second Auto-Dismiss Resume Prompt */}
