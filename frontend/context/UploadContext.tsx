@@ -257,17 +257,6 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
    */
   const processUploadTask = async (task: UploadTask) => {
     const taskId = task.id;
-    isPausedByUser.current.set(taskId, false);
-
-    // Start 15s thumbnail generation in background immediately if not started yet
-    if (!thumbnailPromiseMap.current.has(taskId)) {
-      const thumbPromise = generateAndUploadThumbnail(task.file, task.file.name, 15).catch((err) => {
-        console.warn('Thumbnail generation warning:', err);
-        return null;
-      });
-      thumbnailPromiseMap.current.set(taskId, thumbPromise);
-    }
-
     try {
       setTasks((prev) =>
         prev.map((t) =>
@@ -306,21 +295,18 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Step 2: Upload file smoothly in a single continuous stream
       await uploadSingleFile(task, storageKey, uploadUrl);
 
-      // Step 4: Finalize Thumbnail & Video registration
-      let thumbnailKey = task.thumbnailKey;
-      let blurhash = task.blurhash;
+      // Step 3: Generate and upload thumbnail after video upload finishes
+      let thumbnailKey: string | undefined = task.thumbnailKey;
+      let blurhash: string | undefined = task.blurhash;
 
-      const thumbPromise = thumbnailPromiseMap.current.get(taskId);
-      if (thumbPromise) {
-        try {
-          const generated = await thumbPromise;
-          if (generated?.thumbnailKey) {
-            thumbnailKey = generated.thumbnailKey;
-            blurhash = generated.blurhash;
-          }
-        } catch (e) {
-          console.warn('Thumbnail attachment error:', e);
+      try {
+        const generated = await generateAndUploadThumbnail(task.file, task.file.name, 15);
+        if (generated?.thumbnailKey) {
+          thumbnailKey = generated.thumbnailKey;
+          blurhash = generated.blurhash;
         }
+      } catch (e) {
+        console.warn('Thumbnail attachment error:', e);
       }
 
       // Extract video duration from metadata if available
