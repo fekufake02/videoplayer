@@ -226,12 +226,72 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       };
 
+      xhr.onload = async () => {
+        xhrMap.current.delete(id);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          try {
+            console.warn(`Direct B2 upload returned HTTP ${xhr.status}. Falling back to backend proxy...`);
+            await uploadViaProxy(id, file, storageKey);
+            resolve();
+          } catch (err) {
+            reject(new Error(`Server returned HTTP ${xhr.status} on file upload`));
+          }
+        }
+      };
+
+      xhr.onerror = async () => {
+        xhrMap.current.delete(id);
+        try {
+          console.warn('Direct B2 upload blocked/failed. Retrying via server proxy...');
+          await uploadViaProxy(id, file, storageKey);
+          resolve();
+        } catch (proxyErr) {
+          reject(new Error('Network error during file upload transmission'));
+        }
+      };
+
+      xhr.onabort = () => {
+        xhrMap.current.delete(id);
+        reject(new Error('UPLOAD_ABORTED_BY_USER'));
+      };
+
+      const targetUrl = uploadUrl || `/api/upload-receiver?key=${encodeURIComponent(storageKey)}`;
+      xhr.open('PUT', targetUrl, true);
+      xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+      xhr.send(file);
+    });
+  };
+
+  const uploadViaProxy = (id: string, file: File, storageKey: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhrMap.current.set(id, xhr);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const currentUploaded = e.loaded;
+          const totalBytes = e.total || file.size;
+          const progress = Math.min(99, Math.round((currentUploaded / totalBytes) * 100));
+          const { speed, etaSeconds } = calculateSpeedAndEta(id, currentUploaded, totalBytes);
+
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === id && t.status === 'uploading'
+                ? { ...t, uploadedBytes: currentUploaded, progress, speed, etaSeconds }
+                : t
+            )
+          );
+        }
+      };
+
       xhr.onload = () => {
         xhrMap.current.delete(id);
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(new Error(`Server returned HTTP ${xhr.status} on file upload`));
+          reject(new Error(`Server returned HTTP ${xhr.status} on proxy upload`));
         }
       };
 
@@ -245,8 +305,14 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         reject(new Error('UPLOAD_ABORTED_BY_USER'));
       };
 
-      const targetUrl = uploadUrl || `/api/upload-receiver?key=${encodeURIComponent(storageKey)}`;
-      xhr.open('PUT', targetUrl, true);
+      const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : '/api';
+      const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
+      const proxyUrl = `${backendBase}/videos/upload/proxy?key=${encodeURIComponent(storageKey)}&storageAccount=account2`;
+
+      xhr.open('PUT', proxyUrl, true);
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
       xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
       xhr.send(file);
     });

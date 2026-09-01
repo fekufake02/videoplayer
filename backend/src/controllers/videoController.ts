@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { Video } from '../models/Video';
 import { Settings } from '../models/Settings';
-import { b2Service } from '../services/b2Service';
+import { b2Service, StorageAccount } from '../services/b2Service';
 import { AuthenticatedRequest } from '../middleware/auth';
 
 const initiateUploadSchema = z.object({
@@ -623,5 +623,24 @@ export const toggleFavorite = async (req: AuthenticatedRequest, res: Response): 
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Failed to toggle favorite.' },
     });
+  }
+};
+
+export const proxyUpload = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const storageKey = req.query.key as string;
+    const storageAccount = (req.query.storageAccount as StorageAccount) || 'account2';
+    if (!storageKey) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'Missing storageKey parameter' } });
+      return;
+    }
+
+    const contentType = req.headers['content-type'] || 'application/octet-stream';
+    await b2Service.uploadObjectStream(storageKey, req, contentType, storageAccount);
+
+    res.status(200).json({ success: true, message: 'Upload completed via proxy' });
+  } catch (error: any) {
+    console.error('Proxy upload error:', error);
+    res.status(500).json({ success: false, error: { code: 'PROXY_UPLOAD_FAILED', message: error.message || 'Proxy upload failed' } });
   }
 };

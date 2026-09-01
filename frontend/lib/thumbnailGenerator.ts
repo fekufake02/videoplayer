@@ -371,17 +371,31 @@ export async function generateAndUploadThumbnail(
       throw new Error('Failed to get presigned upload URL for thumbnail');
     }
 
-    // Direct PUT upload to storage or Next.js receiver
-    const uploadResponse = await fetch(uploadRes.uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'image/webp',
-      },
-      body: blob,
-    });
+    // Direct PUT upload to storage with backend proxy fallback
+    try {
+      const uploadResponse = await fetch(uploadRes.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'image/webp',
+        },
+        body: blob,
+      });
 
-    if (!uploadResponse.ok) {
-      console.warn(`Thumbnail PUT upload returned ${uploadResponse.status}, proceeding with storage key`);
+      if (!uploadResponse.ok) {
+        throw new Error(`B2 thumbnail upload status ${uploadResponse.status}`);
+      }
+    } catch (err) {
+      console.warn('Direct thumbnail upload failed, falling back to backend proxy upload:', err);
+      const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : '/api';
+      const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
+      const headers: Record<string, string> = { 'Content-Type': 'image/webp' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      await fetch(`${backendBase}/videos/upload/proxy?key=${encodeURIComponent(uploadRes.storageKey)}&storageAccount=account2`, {
+        method: 'PUT',
+        headers,
+        body: blob,
+      });
     }
 
     return {

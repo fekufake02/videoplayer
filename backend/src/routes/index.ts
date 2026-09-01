@@ -20,6 +20,7 @@ router.get('/library/home', requireAuth, videoController.getLibraryHome);
 // Direct Upload Routes
 router.post('/videos/upload/initiate', requireAuth, videoController.initiateUpload);
 router.post('/videos/upload/complete', requireAuth, videoController.completeUpload);
+router.put('/videos/upload/proxy', requireAuth, videoController.proxyUpload);
 
 // Single Video Operations
 router.get('/videos/:id', requireAuth, videoController.getVideoDetails);

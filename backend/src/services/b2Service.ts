@@ -26,7 +26,7 @@ class B2Service {
               accessKeyId: cfg.accessKeyId,
               secretAccessKey: cfg.secretAccessKey,
             },
-            forcePathStyle: true,
+            forcePathStyle: false,
             requestChecksumCalculation: 'WHEN_REQUIRED',
             responseChecksumValidation: 'WHEN_REQUIRED',
           });
@@ -47,7 +47,7 @@ class B2Service {
             accessKeyId: config.b2.accessKeyId,
             secretAccessKey: config.b2.secretAccessKey,
           },
-          forcePathStyle: true,
+          forcePathStyle: false,
           requestChecksumCalculation: 'WHEN_REQUIRED',
           responseChecksumValidation: 'WHEN_REQUIRED',
         });
@@ -141,6 +141,25 @@ class B2Service {
       ResponseContentDisposition: `attachment; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`,
     });
     return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+  }
+
+  /**
+   * Directly uploads object stream or buffer from server to B2 (bypasses browser CORS)
+   */
+  async uploadObjectStream(
+    storageKey: string,
+    body: any,
+    contentType: string,
+    storageAccount: StorageAccount = 'account2'
+  ): Promise<void> {
+    const { client, bucketName } = this.getClientAndBucket(storageAccount);
+    const command = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: storageKey,
+      Body: body,
+      ContentType: contentType,
+    });
+    await client.send(command);
   }
 
   /**
