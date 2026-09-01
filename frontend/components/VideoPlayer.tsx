@@ -185,7 +185,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       if (videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
-        setDuration(videoRef.current.duration);
+        const d = videoRef.current.duration;
+        setDuration(d);
+        if ((!video.duration || video.duration === 0) && video._id) {
+          api.updateVideoMetadata(video._id, { title: video.title }).catch(() => {});
+        }
       }
       videoRef.current.volume = isMuted ? 0 : volume;
       videoRef.current.playbackRate = playbackSpeed;

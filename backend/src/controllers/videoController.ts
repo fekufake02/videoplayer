@@ -466,7 +466,12 @@ export const getStreamUrl = async (req: AuthenticatedRequest, res: Response): Pr
       return;
     }
 
-    const streamUrl = await b2Service.getPresignedStreamUrl(video.storageKey, 900, video.storageAccount || 'account1');
+    const streamUrl = await b2Service.getPresignedStreamUrl(
+      video.storageKey,
+      900,
+      video.storageAccount || 'account1',
+      video.mimeType || 'video/mp4'
+    );
     let thumbnailUrl: string | undefined = undefined;
 
     if (video.thumbnailKey) {

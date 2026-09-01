@@ -29,7 +29,15 @@ const CORS_RULES = [
       'b2_download_file_by_name',
       'b2_download_file_by_id',
     ],
-    exposeHeaders: ['ETag', 'x-amz-request-id'],
+    exposeHeaders: [
+      'ETag',
+      'Content-Range',
+      'Content-Length',
+      'Accept-Ranges',
+      'Content-Type',
+      'x-amz-request-id',
+      'x-amz-id-2',
+    ],
     maxAgeSeconds: 3600,
   },
 ];
