@@ -52,7 +52,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   // Support both controlled props and global context open state
   const isVisible = propIsOpen !== undefined ? propIsOpen : contextIsOpen;
-  const handleClose = propOnClose || closeUploadModal;
+  const baseClose = propOnClose || closeUploadModal;
+
+  const handleCloseAndClear = () => {
+    clearCompleted();
+    baseClose();
+  };
 
   if (!isVisible) return null;
 
@@ -116,30 +121,22 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         className="glass-panel max-w-3xl w-full rounded-2xl p-6 shadow-2xl border border-white/10 max-h-[90vh] flex flex-col bg-zinc-950/95 text-white"
       >
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 mb-3 border-b border-white/10 shrink-0">
+        <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-400 text-black font-black flex items-center justify-center shadow-lg shadow-amber-400/20 text-base">
+            <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-black flex items-center justify-center shadow-lg shadow-amber-400/20 text-base">
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-extrabold text-white tracking-tight">
-                  Smooth Media Uploader
-                </h3>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[10px] font-semibold text-emerald-300">
-                  Smooth Stream
-                </span>
-              </div>
-              <p className="text-xs text-zinc-400 mt-0.5">
-                Background-active • Automatic retry on network drops • Zero pauses
-              </p>
+              <h3 className="text-base font-extrabold text-white tracking-tight">
+                Media Uploader
+              </h3>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5">
             <button
               id="btn-minimize-upload"
-              onClick={handleClose}
+              onClick={baseClose}
               title="Minimize to background dock"
               className="p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition-colors flex items-center gap-1 text-xs"
             >
@@ -148,7 +145,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             </button>
             <button
               id="btn-close-upload-modal"
-              onClick={handleClose}
+              onClick={handleCloseAndClear}
               className="p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition-colors"
             >
               <X className="w-4 h-4" />
@@ -249,10 +246,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           />
           <UploadCloud className="w-7 h-7 mx-auto mb-1.5 text-amber-400 group-hover:scale-110 transition-transform" />
           <div className="text-xs text-zinc-300">
-            <span className="text-amber-400 font-semibold">Select files</span> or drag & drop videos here anytime
-            <span className="block text-[10px] text-zinc-500 mt-0.5">
-              Supports MP4, WebM, MOV, MKV • Auto extracts frame at 15s
-            </span>
+            <span className="text-amber-400 font-semibold">Select files</span> or drag & drop videos here
           </div>
         </div>
 
@@ -335,8 +329,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             </span>
                           )}
                           {task.status === 'completed' && (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">
-                              Ready
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold flex items-center gap-1">
+                              Done
                             </span>
                           )}
                           {task.status === 'pending' && (
@@ -357,19 +351,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             <>
                               {itemSpeed && <span className="text-emerald-400">{itemSpeed}</span>}
                               {itemEta && <span>{itemEta}</span>}
-                              <span className="text-zinc-500">
-                                Chunk {task.currentChunkIndex}/{task.totalChunks}
-                              </span>
                             </>
                           )}
                           {task.status === 'paused' && (
                             <span className="text-zinc-400">
-                              Resumes at {formatSize(task.uploadedBytes)}
+                              Paused at {formatSize(task.uploadedBytes)}
                             </span>
                           )}
                           {task.status === 'retrying' && (
                             <span className="text-amber-400">
-                              Resuming from byte {formatSize(task.uploadedBytes)}
+                              Retrying from {formatSize(task.uploadedBytes)}
                             </span>
                           )}
                         </div>
@@ -429,7 +420,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         <button
                           type="button"
                           onClick={() => retryUpload(task.id)}
-                          title="Try Again (Resumes from failed position)"
+                          title="Try Again"
                           className="flex items-center gap-1 px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-black font-bold rounded-lg text-xs transition-colors shadow-sm"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
@@ -456,22 +447,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between pt-3 mt-3 border-t border-zinc-900 shrink-0">
-          <span className="text-xs text-zinc-400">
-            {tasks.length > 0
-              ? `${tasks.length} items in vault queue`
-              : 'Add videos to begin uploading'}
-          </span>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold rounded-xl border border-zinc-800 transition-all"
-            >
-              {uploadingTasks.length > 0 ? 'Minimize to Background' : 'Close'}
-            </button>
-          </div>
+        <div className="flex items-center justify-end pt-3 mt-3 border-t border-zinc-900 shrink-0">
+          <button
+            type="button"
+            onClick={handleCloseAndClear}
+            className="px-5 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold rounded-xl border border-zinc-800 transition-all cursor-pointer"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>

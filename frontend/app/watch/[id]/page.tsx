@@ -226,11 +226,8 @@ export default function WatchPage() {
               </div>
 
               {/* Center Golden Spinner */}
-              <div className="flex flex-col items-center gap-3 z-10">
+              <div className="flex flex-col items-center justify-center z-10">
                 <div className="w-12 h-12 sm:w-16 sm:h-16 border-3 sm:border-4 border-zinc-800 border-t-amber-400 rounded-full animate-spin shadow-2xl" />
-                <span className="text-[11px] sm:text-xs font-mono text-amber-400/90 font-semibold tracking-wide bg-zinc-950/80 px-3 py-1 rounded-full border border-amber-400/20">
-                  Loading stream...
-                </span>
               </div>
 
               {/* Bottom Timeline Shell */}

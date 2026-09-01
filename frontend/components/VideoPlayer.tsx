@@ -857,11 +857,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       {/* Center Buffering Spinner or Central Play / Pause Button */}
       {(!isMediaReady || isWaiting) ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-30">
-          <div className="flex flex-col items-center gap-2.5 bg-black/60 backdrop-blur-md px-5 py-4 rounded-2xl border border-white/10 shadow-2xl animate-fade-in">
+          <div className="flex flex-col items-center justify-center bg-black/50 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-2xl animate-fade-in">
             <div className="w-10 h-10 sm:w-14 sm:h-14 border-3 sm:border-4 border-zinc-700/60 border-t-amber-400 rounded-full animate-spin shadow-xl" />
-            <span className="text-[11px] sm:text-xs font-mono text-amber-300 font-semibold tracking-wide">
-              {isMediaReady ? 'Buffering...' : 'Loading stream...'}
-            </span>
           </div>
         </div>
       ) : (
