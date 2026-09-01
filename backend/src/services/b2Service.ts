@@ -4,6 +4,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
+  PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config';
@@ -13,6 +14,34 @@ export type StorageAccount = 'account1' | 'account2';
 class B2Service {
   private client1: S3Client | null = null;
   private client2: S3Client | null = null;
+  private corsConfigured: Record<string, boolean> = {};
+
+  async ensureCors(storageAccount: StorageAccount = 'account2'): Promise<void> {
+    if (this.corsConfigured[storageAccount]) return;
+    try {
+      const { client, bucketName } = this.getClientAndBucket(storageAccount);
+      await client.send(
+        new PutBucketCorsCommand({
+          Bucket: bucketName,
+          CORSConfiguration: {
+            CORSRules: [
+              {
+                AllowedHeaders: ['*'],
+                AllowedMethods: ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+                AllowedOrigins: ['*'],
+                ExposeHeaders: ['ETag'],
+                MaxAgeSeconds: 3600,
+              },
+            ],
+          },
+        })
+      );
+      this.corsConfigured[storageAccount] = true;
+      console.log(`Successfully configured S3 CORS rules for ${storageAccount} (${bucketName})`);
+    } catch (error: any) {
+      console.warn(`Could not auto-apply CORS for ${storageAccount}:`, error.message || error);
+    }
+  }
 
   private getClientAndBucket(storageAccount: StorageAccount = 'account2'): { client: S3Client; bucketName: string } {
     if (storageAccount === 'account1') {
@@ -75,6 +104,7 @@ class B2Service {
     expiresInSeconds: number = 900,
     storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
+    await this.ensureCors(storageAccount);
     const { client, bucketName } = this.getClientAndBucket(storageAccount);
     const command = new PutObjectCommand({
       Bucket: bucketName,
