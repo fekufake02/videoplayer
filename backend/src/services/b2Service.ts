@@ -79,7 +79,6 @@ class B2Service {
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: storageKey,
-      ContentType: contentType,
     });
     return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
   }

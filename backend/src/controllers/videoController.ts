@@ -635,8 +635,14 @@ export const proxyUpload = async (req: AuthenticatedRequest, res: Response): Pro
       return;
     }
 
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
     const contentType = req.headers['content-type'] || 'application/octet-stream';
-    await b2Service.uploadObjectStream(storageKey, req, contentType, storageAccount);
+    await b2Service.uploadObjectStream(storageKey, buffer, contentType, storageAccount);
 
     res.status(200).json({ success: true, message: 'Upload completed via proxy' });
   } catch (error: any) {
