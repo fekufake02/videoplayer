@@ -123,7 +123,7 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
             (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
               v.thumbnailKey,
               3600,
-              v.storageAccount || 'account2'
+              v.storageAccount || 'account1'
             );
           } catch (e) {}
         }

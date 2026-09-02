@@ -27,7 +27,7 @@ export const initiateThumbnailUpload = async (
     const videoId = parsed.success && parsed.data.videoId ? parsed.data.videoId : crypto.randomBytes(8).toString('hex');
     const randomUuid = crypto.randomUUID();
 
-    let targetAccount: 'account1' | 'account2' = 'account2';
+    let targetAccount: 'account1' | 'account2' = 'account1';
     if (parsed.success && parsed.data.videoId) {
       const existingVideo = await Video.findById(parsed.data.videoId);
       if (existingVideo && existingVideo.storageAccount) {

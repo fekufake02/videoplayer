@@ -104,6 +104,20 @@ export async function extractVideoFrame(
     return createFallbackCanvas(labelFallback);
   }
 
+  // Convert remote network URLs to local Blob URLs to eliminate CORS canvas taint completely
+  if (videoUrl.startsWith('http://') || videoUrl.startsWith('https://')) {
+    try {
+      const resp = await fetch(videoUrl);
+      if (resp.ok) {
+        const fetchedBlob = await resp.blob();
+        videoUrl = URL.createObjectURL(fetchedBlob);
+        isBlobUrl = true;
+      }
+    } catch (e) {
+      console.warn('Network video fetch for thumbnail failed, falling back to direct network URL:', e);
+    }
+  }
+
   // 4. Create an offscreen video element attached to DOM to ensure hardware frame rendering
   return new Promise((resolve) => {
     const video = document.createElement('video');
