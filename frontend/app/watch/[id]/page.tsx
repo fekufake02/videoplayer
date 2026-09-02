@@ -121,7 +121,7 @@ export default function WatchPage() {
         video.originalFilename,
         targetTime,
         streamUrl,
-        captureCurrent ? videoEl : null
+        videoEl
       );
 
       if (res.success && res.thumbnailKey) {
