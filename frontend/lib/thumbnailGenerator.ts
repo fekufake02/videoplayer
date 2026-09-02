@@ -448,7 +448,7 @@ export async function reprocessSingleVideoThumbnail(
   timestamp: number = 15,
   customStreamUrl?: string,
   videoElement?: HTMLVideoElement | null
-): Promise<{ success: boolean; thumbnailKey?: string; blurhash?: string; error?: string }> {
+): Promise<{ success: boolean; thumbnailKey?: string; blurhash?: string; thumbnailUrl?: string; error?: string }> {
   try {
     let source: string | File | Blob | HTMLVideoElement | HTMLCanvasElement;
 
@@ -487,11 +487,12 @@ export async function reprocessSingleVideoThumbnail(
       throw new Error('Thumbnail upload could not be completed.');
     }
 
-    await api.attachThumbnail(videoId, result.thumbnailKey, result.blurhash);
+    const attachRes = await api.attachThumbnail(videoId, result.thumbnailKey, result.blurhash, 'account2');
     return {
       success: true,
       thumbnailKey: result.thumbnailKey,
       blurhash: result.blurhash,
+      thumbnailUrl: attachRes.thumbnailUrl,
     };
   } catch (err: any) {
     console.error('Failed to reprocess single thumbnail:', err);

@@ -6,6 +6,7 @@ export interface IVideo extends Document {
   storageKey: string;
   storageAccount?: 'account1' | 'account2';
   thumbnailKey?: string;
+  thumbnailStorageAccount?: 'account1' | 'account2';
   thumbnailUrl?: string;
   blurhash?: string;
   mimeType: string;
@@ -28,6 +29,7 @@ const videoSchema = new Schema<IVideo>(
     storageKey: { type: String, required: true, unique: true },
     storageAccount: { type: String, default: 'account1', enum: ['account1', 'account2'] },
     thumbnailKey: { type: String },
+    thumbnailStorageAccount: { type: String, enum: ['account1', 'account2'] },
     blurhash: { type: String },
     mimeType: { type: String, required: true },
     size: { type: Number, required: true },

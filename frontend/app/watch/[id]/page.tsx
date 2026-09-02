@@ -132,7 +132,7 @@ export default function WatchPage() {
                 ...prev,
                 thumbnailKey: newKey,
                 blurhash: res.blurhash,
-                thumbnailUrl: `/api/upload-receiver?key=${encodeURIComponent(newKey)}`,
+                thumbnailUrl: res.thumbnailUrl || prev?.thumbnailUrl,
               }
             : null
         );

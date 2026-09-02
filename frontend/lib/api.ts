@@ -196,10 +196,10 @@ class ApiClient {
     });
   }
 
-  async attachThumbnail(id: string, thumbnailKey: string, blurhash?: string) {
-    return this.request<{ success: boolean; video: IVideo }>(`/videos/${id}/thumbnail`, {
+  async attachThumbnail(id: string, thumbnailKey: string, blurhash?: string, thumbnailStorageAccount: string = 'account2') {
+    return this.request<{ success: boolean; video: IVideo; thumbnailUrl?: string }>(`/videos/${id}/thumbnail`, {
       method: 'POST',
-      body: JSON.stringify({ thumbnailKey, blurhash }),
+      body: JSON.stringify({ thumbnailKey, blurhash, thumbnailStorageAccount }),
     });
   }
 

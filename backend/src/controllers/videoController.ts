@@ -123,7 +123,7 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
             (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
               v.thumbnailKey,
               3600,
-              v.storageAccount || 'account1'
+              v.thumbnailStorageAccount || v.storageAccount || 'account2'
             );
           } catch (e) {}
         }
@@ -309,7 +309,7 @@ export const completeUpload = async (req: AuthenticatedRequest, res: Response): 
 
 export const attachThumbnail = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { thumbnailKey, blurhash } = req.body;
+    const { thumbnailKey, blurhash, thumbnailStorageAccount } = req.body;
     if (!thumbnailKey || typeof thumbnailKey !== 'string') {
       res.status(400).json({
         success: false,
@@ -329,22 +329,34 @@ export const attachThumbnail = async (req: AuthenticatedRequest, res: Response):
 
     // Automatically delete older thumbnail from B2 storage account to save space
     if (video.thumbnailKey && video.thumbnailKey !== thumbnailKey) {
-      const accountToUse = video.storageAccount || 'account1';
+      const accountToUse = video.thumbnailStorageAccount || video.storageAccount || 'account1';
       console.log(`Deleting previous thumbnail (${video.thumbnailKey}) from B2 ${accountToUse}...`);
       b2Service.deleteObject(video.thumbnailKey, accountToUse).catch((err) => {
         console.warn('Failed to delete old thumbnail from B2:', err);
       });
     }
 
+    const targetAccount = thumbnailStorageAccount || 'account2';
     video.thumbnailKey = thumbnailKey;
+    video.thumbnailStorageAccount = targetAccount;
     if (blurhash && typeof blurhash === 'string') {
       video.blurhash = blurhash;
     }
     await video.save();
 
+    // Generate valid presigned URL for frontend immediate display
+    let thumbnailUrl = '';
+    try {
+      thumbnailUrl = await b2Service.getPresignedStreamUrl(thumbnailKey, 3600, targetAccount);
+    } catch {}
+
+    const videoObj = video.toObject();
+    (videoObj as any).thumbnailUrl = thumbnailUrl;
+
     res.status(200).json({
       success: true,
-      video,
+      video: videoObj,
+      thumbnailUrl,
     });
   } catch (error) {
     console.error('Attach thumbnail error:', error);
@@ -372,7 +384,7 @@ export const getVideoDetails = async (req: AuthenticatedRequest, res: Response):
         (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
           video.thumbnailKey,
           3600,
-          video.storageAccount || 'account2'
+          video.thumbnailStorageAccount || video.storageAccount || 'account2'
         );
       } catch (e) {}
     }

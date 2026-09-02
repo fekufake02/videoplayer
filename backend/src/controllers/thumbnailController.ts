@@ -27,13 +27,8 @@ export const initiateThumbnailUpload = async (
     const videoId = parsed.success && parsed.data.videoId ? parsed.data.videoId : crypto.randomBytes(8).toString('hex');
     const randomUuid = crypto.randomUUID();
 
-    let targetAccount: 'account1' | 'account2' = 'account1';
-    if (parsed.success && parsed.data.videoId) {
-      const existingVideo = await Video.findById(parsed.data.videoId);
-      if (existingVideo && existingVideo.storageAccount) {
-        targetAccount = existingVideo.storageAccount;
-      }
-    }
+    // Always use account2 for uploading new thumbnails to guarantee CORS & write credentials
+    const targetAccount: 'account1' | 'account2' = 'account2';
 
     const rawExt = path.extname(filename) || '.webp';
     const safeExt = rawExt.replace(/[^a-zA-Z0-9.]/g, '');
@@ -138,7 +133,7 @@ export const getThumbnailUrl = async (
   try {
     const { id } = req.params;
 
-    const video = await Video.findById(id).select('thumbnailKey storageAccount');
+    const video = await Video.findById(id).select('thumbnailKey thumbnailStorageAccount storageAccount');
     if (!video || !video.thumbnailKey) {
       res.status(404).json({
         success: false,
@@ -147,7 +142,7 @@ export const getThumbnailUrl = async (
       return;
     }
 
-    const accountToUse = video.storageAccount || 'account1';
+    const accountToUse = video.thumbnailStorageAccount || video.storageAccount || 'account2';
     const thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600, accountToUse);
 
     res.status(200).json({
