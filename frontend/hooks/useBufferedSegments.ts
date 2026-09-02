@@ -29,9 +29,7 @@ export const useBufferedSegments = (
 
     const video = videoRef.current;
     const buffered = video.buffered;
-    const duration = video.duration;
-
-    if (!duration || isNaN(duration) || duration <= 0) return;
+    let duration = video.duration;
 
     const ranges: BufferedRange[] = [];
     let totalBuffered = 0;
@@ -49,6 +47,11 @@ export const useBufferedSegments = (
           // Ignore index out of bounds if buffered changed during loop
         }
       }
+    }
+
+    const maxEnd = ranges.length > 0 ? Math.max(...ranges.map((r) => r.end)) : video.currentTime;
+    if (!duration || isNaN(duration) || !isFinite(duration) || duration <= 0) {
+      duration = Math.max(video.currentTime, maxEnd, 1);
     }
 
     const percentBuffered = duration > 0 ? Math.min(100, (totalBuffered / duration) * 100) : 0;

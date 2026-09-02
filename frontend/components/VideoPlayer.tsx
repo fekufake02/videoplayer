@@ -1119,26 +1119,54 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           className="space-y-1 sm:space-y-2 pointer-events-auto bg-zinc-950/85 sm:bg-zinc-950/70 p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl backdrop-blur-md border border-white/5 shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Scrubber Bar */}
-          <div className="flex items-center gap-1.5 sm:gap-3">
-            <span className="font-mono text-[10px] sm:text-xs text-slate-300 min-w-[28px] sm:min-w-[40px] text-right font-medium">
-              {formatTime(currentTime)}
-            </span>
-            <div className="flex-1">
-              <BufferingIndicator
-                bufferedRanges={bufferingState.bufferedRanges}
-                currentTime={currentTime}
-                duration={duration || 100}
-                percentBuffered={bufferingState.percentBuffered}
-                isBuffering={bufferingState.isBuffering}
-                onSeek={handleDirectSeek}
-                maxBufferAhead={120}
-              />
-            </div>
-            <span className="font-mono text-[10px] sm:text-xs text-slate-400 min-w-[28px] sm:min-w-[40px] font-medium">
-              {formatTime(duration)}
-            </span>
-          </div>
+          {/* Dynamic duration computation for MPEG-TS / non-standard streams */}
+          {(() => {
+            const maxBufferedEnd = bufferingState.bufferedRanges.length > 0
+              ? Math.max(...bufferingState.bufferedRanges.map((r) => r.end))
+              : currentTime;
+
+            const isMpegStream = (videoRef.current?.duration && !isFinite(videoRef.current.duration)) || !!mpegtsPlayerRef.current;
+            const isDynamicStream = isMpegStream || (!video.duration && (!duration || !isFinite(duration) || duration <= 0));
+
+            const effectiveDuration = (duration && isFinite(duration) && duration > 0)
+              ? duration
+              : (video.duration && isFinite(video.duration) && video.duration > 0
+                ? video.duration
+                : Math.max(currentTime, maxBufferedEnd, 0));
+
+            return (
+              <div className="flex items-center gap-1.5 sm:gap-3">
+                <span className="font-mono text-[10px] sm:text-xs text-slate-300 min-w-[28px] sm:min-w-[40px] text-right font-medium">
+                  {formatTime(currentTime)}
+                </span>
+                <div className="flex-1">
+                  <BufferingIndicator
+                    bufferedRanges={bufferingState.bufferedRanges}
+                    currentTime={currentTime}
+                    duration={effectiveDuration > 0 ? effectiveDuration : (currentTime > 0 ? currentTime : 1)}
+                    percentBuffered={bufferingState.percentBuffered}
+                    isBuffering={bufferingState.isBuffering}
+                    onSeek={handleDirectSeek}
+                    maxBufferAhead={120}
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 min-w-[28px] sm:min-w-[40px]">
+                  <span className="font-mono text-[10px] sm:text-xs text-slate-400 font-medium">
+                    {formatTime(effectiveDuration)}
+                  </span>
+                  {isDynamicStream && (
+                    <span
+                      title="Dynamic Stream / MPEG Container - Buffer expands automatically"
+                      className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[9px] font-bold uppercase tracking-wider"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      DYNAMIC STREAM
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Action Buttons Row */}
           <div className="flex items-center justify-between gap-1 sm:gap-3">
