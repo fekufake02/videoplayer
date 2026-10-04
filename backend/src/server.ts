@@ -51,7 +51,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Range'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Range', 'Cache-Control', 'cache-control', 'Pragma', 'pragma', 'Expires', 'X-Requested-With'],
   })
 );
 
@@ -74,7 +74,7 @@ app.use(
       sameSite: isDeployed ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     },
-  })
+  }) as any
 );
 
 // Mount API Routes

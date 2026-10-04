@@ -136,7 +136,10 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
 
     const videos = await Promise.all(
       rawVideos.map(async (v) => {
-        const obj = v.toObject();
+        const obj = typeof v.toObject === 'function' ? v.toObject() : { ...v };
+        if (obj._id) {
+          obj._id = obj._id.toString();
+        }
         if (v.thumbnailKey) {
           try {
             (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
