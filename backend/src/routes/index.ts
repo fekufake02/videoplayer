@@ -45,4 +45,7 @@ router.get('/settings', requireAuth, settingsController.getSettings);
 router.patch('/settings', requireAuth, settingsController.updateSettings);
 router.post('/settings/clear-history', requireAuth, settingsController.clearHistory);
 
+// Admin Password Management (requires authentication)
+router.post('/settings/admin/update-password', requireAuth, settingsController.updateAdminPassword);
+
 export default router;
