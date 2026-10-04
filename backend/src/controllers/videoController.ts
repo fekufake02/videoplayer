@@ -111,10 +111,28 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
         break;
     }
 
-    const [rawVideos, total] = await Promise.all([
-      Video.find(query).sort(sortOption).skip(skip).limit(limit),
-      Video.countDocuments(query),
-    ]);
+    let rawVideos: any[] = [];
+    let total = 0;
+
+    if (sort === 'random') {
+      total = await Video.countDocuments(query);
+      try {
+        rawVideos = await Video.aggregate([
+          { $match: query },
+          { $sample: { size: limit } },
+        ]);
+      } catch {
+        const randomSkip = Math.max(0, Math.floor(Math.random() * Math.max(1, total - limit)));
+        rawVideos = await Video.find(query).skip(randomSkip).limit(limit);
+      }
+    } else {
+      const [rv, tot] = await Promise.all([
+        Video.find(query).sort(sortOption).skip(skip).limit(limit),
+        Video.countDocuments(query),
+      ]);
+      rawVideos = rv;
+      total = tot;
+    }
 
     const videos = await Promise.all(
       rawVideos.map(async (v) => {

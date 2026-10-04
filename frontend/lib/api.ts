@@ -391,12 +391,12 @@ class ApiClient {
 
   /**
    * Get 5-6 random video suggestions excluding the current playing video
-   * Calls backend or Next.js suggestion endpoints with cache busting
+   * Samples directly from the user's MongoDB database (400+ videos) with B2 thumbnails
    */
   async getSuggestions(currentVideoId?: string): Promise<{ success: boolean; videos: IVideo[] }> {
     const query = currentVideoId ? `?currentVideoId=${encodeURIComponent(currentVideoId)}&t=${Date.now()}` : `?t=${Date.now()}`;
     
-    // 1. Try standard API client request (/api/suggestion or backend)
+    // 1. First try dedicated /suggestion route (fastest if backend has new route)
     try {
       const res = await this.request<{ success: boolean; videos: IVideo[] }>(`/suggestion${query}`, {
         method: 'GET',
@@ -406,10 +406,90 @@ class ApiClient {
         return res;
       }
     } catch (err) {
-      // Continue to fallback
+      // Dedicated route not deployed yet or errored, proceed to real DB sampling
     }
 
-    // 2. Try root /suggestion route
+    // 2. Query real videos directly from the user's database via listVideos
+    // This connects directly to their MongoDB (400+ videos) with Backblaze B2 thumbnails
+    try {
+      // Attempt sort=random query first
+      const randomAttempt = await this.listVideos({
+        limit: 10,
+        sort: 'random',
+      });
+
+      const total = randomAttempt?.total || 0;
+      let candidatePool = (randomAttempt?.videos || []).filter((v) => !currentVideoId || v._id !== currentVideoId);
+
+      // If sort=random didn't randomize or returned first batch, use random page sampling across total videos
+      if (total > 0 && candidatePool.length < 6) {
+        const pageSize = 6;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const randomPage = Math.floor(Math.random() * totalPages) + 1;
+
+        const pageRes = await this.listVideos({
+          page: randomPage,
+          limit: pageSize,
+        });
+
+        if (pageRes?.videos && pageRes.videos.length > 0) {
+          const filtered = pageRes.videos.filter((v) => !currentVideoId || v._id !== currentVideoId);
+          candidatePool = [...candidatePool, ...filtered];
+        }
+
+        // If we still need more videos to reach 6, sample a second random page from the 400+ videos
+        if (candidatePool.length < 6 && totalPages > 1) {
+          const secondPage = ((randomPage + Math.floor(Math.random() * (totalPages - 1)) + 1) % totalPages) || 1;
+          const secondRes = await this.listVideos({
+            page: secondPage,
+            limit: pageSize,
+          });
+          if (secondRes?.videos) {
+            const more = secondRes.videos.filter(
+              (v) => (!currentVideoId || v._id !== currentVideoId) && !candidatePool.some((p) => p._id === v._id)
+            );
+            candidatePool = [...candidatePool, ...more];
+          }
+        }
+      } else if (total > 6) {
+        // We have 400+ videos: pick a completely random page from the entire database
+        const pageSize = 6;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const randomPage = Math.floor(Math.random() * totalPages) + 1;
+
+        const pageRes = await this.listVideos({
+          page: randomPage,
+          limit: pageSize,
+        });
+
+        if (pageRes?.videos && pageRes.videos.length > 0) {
+          candidatePool = pageRes.videos.filter((v) => !currentVideoId || v._id !== currentVideoId);
+        }
+      }
+
+      if (candidatePool.length > 0) {
+        // Deduplicate
+        const uniqueMap = new Map<string, IVideo>();
+        candidatePool.forEach((v) => {
+          if (v && v._id && (!currentVideoId || v._id !== currentVideoId)) {
+            uniqueMap.set(v._id, v);
+          }
+        });
+        const uniqueList = Array.from(uniqueMap.values());
+
+        // Truly randomize with Fisher-Yates shuffle
+        for (let i = uniqueList.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [uniqueList[i], uniqueList[j]] = [uniqueList[j], uniqueList[i]];
+        }
+
+        return { success: true, videos: uniqueList.slice(0, 6) };
+      }
+    } catch (err) {
+      console.warn('Real database sampling via listVideos error:', err);
+    }
+
+    // 3. Fallback: try relative /suggestion route only if real DB list returned nothing
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
       const response = await fetch(`/suggestion${query}`, {
@@ -423,25 +503,6 @@ class ApiClient {
       if (response.ok) {
         const data = await response.json();
         if (data && data.success && Array.isArray(data.videos) && data.videos.length > 0) {
-          return data;
-        }
-      }
-    } catch {}
-
-    // 3. Try /api/suggestion directly via fetch
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
-      const response = await fetch(`/api/suggestion${query}`, {
-        method: 'GET',
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.success && Array.isArray(data.videos)) {
           return data;
         }
       }
