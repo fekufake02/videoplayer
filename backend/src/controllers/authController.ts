@@ -3,7 +3,6 @@ import argon2 from 'argon2';
 import { z } from 'zod';
 import { User } from '../models/User';
 import { Settings } from '../models/Settings';
-import { config } from '../config';
 import { AuthenticatedRequest, generateToken, verifyToken } from '../middleware/auth';
 
 const loginSchema = z.object({
@@ -12,13 +11,16 @@ const loginSchema = z.object({
 
 /**
  * Ensures at least one user exists in the database.
- * Seeds an admin user if database is empty.
+ * Seeds an admin user with a default password if database is empty.
+ * Default password: admin123
  */
 export const ensureAdminUser = async () => {
   try {
     const userCount = await User.countDocuments();
     if (userCount === 0) {
-      const hashedPassword = await argon2.hash(config.adminPassword, {
+      // Use default password for initial setup
+      const defaultPassword = 'admin123';
+      const hashedPassword = await argon2.hash(defaultPassword, {
         type: argon2.argon2id,
       });
       const adminUser = await User.create({
@@ -30,7 +32,7 @@ export const ensureAdminUser = async () => {
       await Settings.create({
         userId: adminUser._id.toString(),
       });
-      console.log('Seeded initial admin user into database.');
+      console.log('Seeded initial admin user into database with default password: admin123');
     }
   } catch (error) {
     console.error('Error ensuring admin user exists:', error);
