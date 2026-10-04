@@ -90,7 +90,13 @@ interface ISettingsItem {
 }
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'metime_vault_secret_key_32_chars_ok';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
+function getAdminPassword(): string {
+  const configuredPassword = process.env.ADMIN_PASSWORD;
+  return configuredPassword && configuredPassword.trim().length > 0
+    ? configuredPassword.trim()
+    : 'admin123';
+}
 
 // Seed sample videos for immediate out-of-the-box private library experience
 const initialVideos: IVideoItem[] = [
@@ -775,8 +781,9 @@ export async function POST(
     try {
       const body = await req.json();
       const password = body.password;
+      const expectedPassword = getAdminPassword();
 
-      if (!password || password !== ADMIN_PASSWORD) {
+      if (!password || password !== expectedPassword) {
         return NextResponse.json(
           { success: false, error: { message: 'Invalid authentication password.' } },
           { status: 401 }
