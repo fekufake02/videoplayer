@@ -82,6 +82,7 @@ interface ISettingsItem {
   autoLockDuration: number;
   privacyTabHidden: boolean;
   lockOnWindowBlur?: boolean;
+  blockPlaceholders?: boolean;
   pauseOnTabSwitch?: boolean;
   keyboardShortcuts?: boolean;
   saveWatchHistory: boolean;
@@ -264,6 +265,27 @@ loadVideosFromDisk();
 // Repair all initially loaded items
 Array.from(globalVideos.values()).forEach(repairVideoItem);
 
+const SETTINGS_FILE = path.join(STORAGE_DIR, 'settings.json');
+const PASSWORD_FILE = path.join(STORAGE_DIR, 'admin_password.txt');
+
+function getAdminPassword(): string {
+  try {
+    if (fs.existsSync(PASSWORD_FILE)) {
+      const p = fs.readFileSync(PASSWORD_FILE, 'utf8').trim();
+      if (p) return p;
+    }
+  } catch {}
+  return process.env.ADMIN_PASSWORD || 'admin123';
+}
+
+function setAdminPassword(newPass: string) {
+  try {
+    fs.writeFileSync(PASSWORD_FILE, newPass.trim(), 'utf8');
+  } catch (e) {
+    console.warn('Could not save password to disk:', e);
+  }
+}
+
 let globalSettings: ISettingsItem = {
   userId: 'admin-1',
   defaultPlaybackSpeed: 1,
@@ -275,12 +297,34 @@ let globalSettings: ISettingsItem = {
   autoLockDuration: 15,
   privacyTabHidden: false,
   lockOnWindowBlur: false,
+  blockPlaceholders: false,
   pauseOnTabSwitch: true,
   keyboardShortcuts: true,
   saveWatchHistory: true,
   theme: 'dark',
   layout: 'comfortable',
 };
+
+function loadSettingsFromDisk() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (parsed && typeof parsed === 'object') {
+        globalSettings = { ...globalSettings, ...parsed };
+      }
+    }
+  } catch {}
+}
+
+function saveSettingsToDisk() {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(globalSettings, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Failed to save settings to disk:', err);
+  }
+}
+
+loadSettingsFromDisk();
 
 // Token utilities
 function generateAuthToken(userId: string, username: string): string {
@@ -331,12 +375,22 @@ export async function GET(
     return new NextResponse('OK', { status: 200 });
   }
 
-  // 2. Auth: /api/auth/me - DEPRECATED: redirect to backend
+  // 2. Auth: /api/auth/me
   if (path === 'auth/me') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json({
+        success: false,
+        authenticated: false,
+        error: { message: 'Unauthorized' },
+      }, { status: 401 });
+    }
     return NextResponse.json({
-      success: false,
-      error: { message: 'Frontend auth endpoint deprecated. Use backend API.' },
-    }, { status: 410 });
+      success: true,
+      authenticated: true,
+      user: { id: userAuth.userId, username: userAuth.username },
+      settings: globalSettings,
+    });
   }
 
   // 3. User Settings: /api/settings
@@ -397,6 +451,42 @@ export async function GET(
       mostWatched,
       recentlyAdded,
     });
+  }
+
+  // 4.1 Suggestions: /api/suggestion or /api/videos/suggestion
+  if (path === 'suggestion' || path === 'videos/suggestion') {
+    const currentVideoId = req.nextUrl.searchParams.get('currentVideoId') ||
+      req.nextUrl.searchParams.get('exclude') ||
+      req.nextUrl.searchParams.get('id');
+
+    // Filter candidate videos excluding the current video
+    const candidates = Array.from(globalVideos.values())
+      .filter((v) => !currentVideoId || v._id !== currentVideoId);
+
+    // Truly randomize using Fisher-Yates with Math.random() so each call yields a fresh random set
+    const shuffled = [...candidates];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    // Select 6 random videos (or all if fewer)
+    const selected = shuffled.slice(0, 6).map((v) => {
+      repairVideoItem(v);
+      return v;
+    });
+
+    return NextResponse.json(
+      {
+        success: true,
+        videos: selected,
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+      }
+    );
   }
 
   // 5. Video Listing: /api/videos
@@ -757,20 +847,94 @@ export async function POST(
   const slug = params?.slug || [];
   const path = slug.join('/');
 
-  // 1. Auth: /api/auth/login - DEPRECATED: redirect to backend
+  // 1. Auth: /api/auth/login
   if (path === 'auth/login') {
-    return NextResponse.json({
-      success: false,
-      error: { message: 'Frontend auth endpoint deprecated. Please authenticate via backend API.' },
-    }, { status: 410 });
+    try {
+      const body = await req.json();
+      const password = body.password;
+      const expectedPassword = getAdminPassword();
+      const envPassword = process.env.ADMIN_PASSWORD;
+
+      let isMatch = false;
+      if (password && (password === expectedPassword || (envPassword && password === envPassword))) {
+        isMatch = true;
+      }
+
+      if (!isMatch) {
+        return NextResponse.json({
+          success: false,
+          error: { message: 'Invalid authentication password.' },
+        }, { status: 401 });
+      }
+
+      const token = generateAuthToken('admin-1', 'admin');
+      return NextResponse.json({
+        success: true,
+        token,
+        user: { id: 'admin-1', username: 'admin' },
+        settings: globalSettings,
+      });
+    } catch (e: any) {
+      return NextResponse.json({
+        success: false,
+        error: { message: 'Authentication error' },
+      }, { status: 500 });
+    }
   }
 
-  // 2. Auth: /api/auth/logout - DEPRECATED: redirect to backend
+  // 2. Auth: /api/auth/logout
   if (path === 'auth/logout') {
-    return NextResponse.json({
-      success: false,
-      error: { message: 'Frontend auth endpoint deprecated. Please logout via backend API.' },
-    }, { status: 410 });
+    return NextResponse.json({ success: true });
+  }
+
+  // 2.1 Update Admin Password: /api/settings/admin/update-password
+  if (path === 'settings/admin/update-password') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json({
+        success: false,
+        error: { message: 'Unauthorized' },
+      }, { status: 401 });
+    }
+
+    try {
+      const body = await req.json();
+      const { currentPassword, newPassword } = body;
+
+      const expectedPassword = getAdminPassword();
+      const envPassword = process.env.ADMIN_PASSWORD;
+
+      let isMatch = false;
+      if (currentPassword && (currentPassword === expectedPassword || (envPassword && currentPassword === envPassword))) {
+        isMatch = true;
+      }
+
+      if (!isMatch) {
+        return NextResponse.json({
+          success: false,
+          error: { message: 'Current password is incorrect.' },
+        }, { status: 401 });
+      }
+
+      if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+        return NextResponse.json({
+          success: false,
+          error: { message: 'New password must be at least 8 characters long.' },
+        }, { status: 400 });
+      }
+
+      setAdminPassword(newPassword);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Password updated successfully.',
+      });
+    } catch (e: any) {
+      return NextResponse.json({
+        success: false,
+        error: { message: 'Failed to update password' },
+      }, { status: 500 });
+    }
   }
 
   // 3. Initiate Upload: /api/videos/upload/initiate
@@ -1035,6 +1199,7 @@ export async function PATCH(
       ...globalSettings,
       ...body,
     };
+    saveSettingsToDisk();
 
     return NextResponse.json({
       success: true,

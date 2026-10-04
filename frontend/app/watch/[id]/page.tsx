@@ -9,6 +9,7 @@ import { Navbar } from '../../../components/Navbar';
 import { VideoPlayer } from '../../../components/VideoPlayer';
 import { EditMetadataModal } from '../../../components/EditMetadataModal';
 import { DeleteConfirmModal } from '../../../components/DeleteConfirmModal';
+import { VideoSuggestions } from '../../../components/VideoSuggestions';
 import {
   Heart,
   Download,
@@ -448,6 +449,9 @@ export default function WatchPage() {
                 </div>
               </div>
             </div>
+
+            {/* Suggested Videos Below Player */}
+            <VideoSuggestions currentVideoId={video._id} />
           </>
         ) : null}
       </main>

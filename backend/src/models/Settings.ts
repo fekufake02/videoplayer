@@ -11,6 +11,7 @@ export interface ISettings extends Document {
   autoLockDuration: number; // in minutes, 0 means Never
   privacyTabHidden: boolean; // Lock on tab switch
   lockOnWindowBlur: boolean; // Lock when browser loses focus
+  blockPlaceholders: boolean; // Privacy feature: block all thumbnails and placeholders
   pauseOnTabSwitch: boolean; // Pause video when switching tabs
   keyboardShortcuts: boolean; // Enable panic & player hotkeys
   saveWatchHistory: boolean;
@@ -30,6 +31,7 @@ const settingsSchema = new Schema<ISettings>(
     autoLockDuration: { type: Number, default: 15 },
     privacyTabHidden: { type: Boolean, default: false },
     lockOnWindowBlur: { type: Boolean, default: false },
+    blockPlaceholders: { type: Boolean, default: false },
     pauseOnTabSwitch: { type: Boolean, default: true },
     keyboardShortcuts: { type: Boolean, default: true },
     saveWatchHistory: { type: Boolean, default: true },

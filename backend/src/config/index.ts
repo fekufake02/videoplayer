@@ -31,6 +31,7 @@ export const config = {
   },
 
   sessionSecret: process.env.SESSION_SECRET || 'dev_secret_change_me_in_production_32_chars',
+  adminPassword: process.env.ADMIN_PASSWORD || 'admin123',
 
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   backendUrl: process.env.BACKEND_URL || 'http://localhost:4000',

@@ -16,6 +16,7 @@ router.get('/auth/me', authController.me);
 // Library & Video Listing Routes
 router.get('/videos', requireAuth, videoController.listVideos);
 router.get('/library/home', requireAuth, videoController.getLibraryHome);
+router.get('/suggestion', requireAuth, videoController.getSuggestions);
 
 // Direct Upload Routes
 router.post('/videos/upload/initiate', requireAuth, videoController.initiateUpload);

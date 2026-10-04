@@ -16,6 +16,7 @@ const updateSettingsSchema = z.object({
   autoLockDuration: z.number().min(0).optional(),
   privacyTabHidden: z.boolean().optional(),
   lockOnWindowBlur: z.boolean().optional(),
+  blockPlaceholders: z.boolean().optional(),
   pauseOnTabSwitch: z.boolean().optional(),
   keyboardShortcuts: z.boolean().optional(),
   saveWatchHistory: z.boolean().optional(),
@@ -144,8 +145,16 @@ export const updateAdminPassword = async (req: AuthenticatedRequest, res: Respon
 
     const { currentPassword, newPassword } = parsed.data;
 
-    // Verify current password
-    const isMatch = await argon2.verify(user.passwordHash, currentPassword);
+    // Verify current password against stored hash OR process.env.ADMIN_PASSWORD
+    let isMatch = false;
+    try {
+      isMatch = await argon2.verify(user.passwordHash, currentPassword);
+    } catch {}
+
+    if (!isMatch && process.env.ADMIN_PASSWORD && currentPassword === process.env.ADMIN_PASSWORD) {
+      isMatch = true;
+    }
+
     if (!isMatch) {
       res.status(401).json({
         success: false,

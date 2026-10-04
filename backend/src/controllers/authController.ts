@@ -12,18 +12,17 @@ const loginSchema = z.object({
 /**
  * Ensures at least one user exists in the database.
  * Seeds an admin user with a default password if database is empty.
- * Default password: admin123
+ * Default password: admin123 (or process.env.ADMIN_PASSWORD)
  */
 export const ensureAdminUser = async () => {
   try {
-    const userCount = await User.countDocuments();
-    if (userCount === 0) {
-      // Use default password for initial setup
-      const defaultPassword = 'admin123';
-      const hashedPassword = await argon2.hash(defaultPassword, {
+    const envPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    let adminUser = await User.findOne({ username: 'admin' });
+    if (!adminUser) {
+      const hashedPassword = await argon2.hash(envPassword, {
         type: argon2.argon2id,
       });
-      const adminUser = await User.create({
+      adminUser = await User.create({
         username: 'admin',
         passwordHash: hashedPassword,
       });
@@ -32,7 +31,18 @@ export const ensureAdminUser = async () => {
       await Settings.create({
         userId: adminUser._id.toString(),
       });
-      console.log('Seeded initial admin user into database with default password: admin123');
+      console.log('Seeded initial admin user into database with password from env/default.');
+    } else if (process.env.ADMIN_PASSWORD) {
+      // If ADMIN_PASSWORD is set in environment, check if it matches current hash
+      // If not, synchronize password hash so changing env immediately takes effect!
+      const matchesEnv = await argon2.verify(adminUser.passwordHash, process.env.ADMIN_PASSWORD).catch(() => false);
+      if (!matchesEnv) {
+        adminUser.passwordHash = await argon2.hash(process.env.ADMIN_PASSWORD, {
+          type: argon2.argon2id,
+        });
+        await adminUser.save();
+        console.log('Synchronized admin user password in database with process.env.ADMIN_PASSWORD.');
+      }
     }
   } catch (error) {
     console.error('Error ensuring admin user exists:', error);
@@ -70,7 +80,23 @@ export const login = async (req: AuthenticatedRequest, res: Response): Promise<v
       return;
     }
 
-    const isMatch = await argon2.verify(user.passwordHash, password);
+    // Check against passwordHash in database OR direct process.env.ADMIN_PASSWORD match
+    let isMatch = false;
+    try {
+      isMatch = await argon2.verify(user.passwordHash, password);
+    } catch {}
+
+    // If environment variable ADMIN_PASSWORD was changed, honor it and update DB hash
+    if (!isMatch && process.env.ADMIN_PASSWORD && password === process.env.ADMIN_PASSWORD) {
+      isMatch = true;
+      try {
+        user.passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+        await user.save();
+      } catch (err) {
+        console.warn('Could not update passwordHash on env login sync:', err);
+      }
+    }
+
     if (!isMatch) {
       res.status(401).json({
         success: false,

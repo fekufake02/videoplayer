@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useAuth } from '../context/AuthContext';
 import { IVideo } from '../types';
 import { Play, Heart, MoreVertical, Clock, Download, Edit3, Trash2, Tag } from 'lucide-react';
 import { api } from '../lib/api';
@@ -22,6 +24,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   onDelete,
   onFavoriteToggle,
 }) => {
+  const pathname = usePathname();
+  const { settings } = useAuth();
+  const shouldBlockThumbnail = (pathname === '/' || pathname === '' || pathname === '/#') && !!settings?.blockPlaceholders;
+
   const [isFavorite, setIsFavorite] = useState(video.favorite);
   const [showMenu, setShowMenu] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -31,6 +37,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
   const handleMouseEnter = async () => {
     setIsHovered(true);
+    if (shouldBlockThumbnail) return;
     
     // Lazy load thumbnail URL on first hover if not already loaded
     if (!thumbnailUrl && !video.thumbnailKey) {
@@ -147,6 +154,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           blurhash={video.blurhash}
           fallbackText={video.originalFilename}
           alt={video.title}
+          blocked={shouldBlockThumbnail}
           className="group-hover:scale-105 transition-transform duration-500"
           onLoad={() => {
             // Thumbnail loaded successfully

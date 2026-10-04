@@ -388,6 +388,46 @@ class ApiClient {
       { method: 'GET' }
     );
   }
+
+  /**
+   * Get 5-6 random video suggestions excluding the current playing video
+   * Calls /suggestion route directly or /api/suggestion
+   */
+  async getSuggestions(currentVideoId?: string): Promise<{ success: boolean; videos: IVideo[] }> {
+    const query = currentVideoId ? `?currentVideoId=${encodeURIComponent(currentVideoId)}&t=${Date.now()}` : `?t=${Date.now()}`;
+    try {
+      // First attempt relative /suggestion route as requested by user
+      const response = await fetch(`/suggestion${query}`, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store',
+          ...(typeof window !== 'undefined' && localStorage.getItem('metime_auth_token')
+            ? { Authorization: `Bearer ${localStorage.getItem('metime_auth_token')}` }
+            : {}),
+        },
+      });
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch {}
+
+    // Fallback to /api/suggestion
+    return this.request<{ success: boolean; videos: IVideo[] }>(`/suggestion${query}`, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+  }
+
+  /**
+   * Update master admin password from settings
+   */
+  async updateAdminPassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>('/settings/admin/update-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  }
 }
 
 export const api = new ApiClient();

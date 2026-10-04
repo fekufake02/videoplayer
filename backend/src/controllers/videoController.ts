@@ -684,3 +684,60 @@ export const proxyUpload = async (req: AuthenticatedRequest, res: Response): Pro
     res.status(500).json({ success: false, error: { code: 'PROXY_UPLOAD_FAILED', message: error.message || 'Proxy upload failed' } });
   }
 };
+
+/**
+ * Get random video suggestions (5-6 videos) excluding the current playing video
+ * GET /api/suggestion?currentVideoId=... or GET /suggestion
+ */
+export const getSuggestions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const currentVideoId = (req.query.currentVideoId || req.query.exclude || req.query.id) as string;
+
+    const query: any = {};
+    if (currentVideoId) {
+      query._id = { $ne: currentVideoId };
+    }
+
+    // Fetch candidate videos excluding current video
+    const allVideos = await Video.find(query).limit(50);
+
+    // Truly randomize using Fisher-Yates shuffle with Math.random()
+    const shuffled = [...allVideos];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    // Select up to 6 random videos
+    const selected = shuffled.slice(0, 6);
+
+    // Resolve presigned thumbnail URLs
+    const videosWithThumbnails = await Promise.all(
+      selected.map(async (v) => {
+        const obj = v.toObject();
+        if (v.thumbnailKey) {
+          try {
+            (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
+              v.thumbnailKey,
+              3600,
+              v.thumbnailStorageAccount || v.storageAccount || 'account2'
+            );
+          } catch (e) {}
+        }
+        return obj;
+      })
+    );
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.status(200).json({
+      success: true,
+      videos: videosWithThumbnails,
+    });
+  } catch (error) {
+    console.error('Get suggestions error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch suggestions.' },
+    });
+  }
+};

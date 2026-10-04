@@ -31,6 +31,7 @@ export interface ISettings {
   autoLockDuration: number; // minutes (0 = Never)
   privacyTabHidden: boolean; // Lock on tab switch
   lockOnWindowBlur?: boolean; // Lock when browser loses focus
+  blockPlaceholders?: boolean; // Privacy feature: block all thumbnails and placeholders
   pauseOnTabSwitch?: boolean; // Pause video when switching tabs
   keyboardShortcuts?: boolean; // Enable panic & player hotkeys
   saveWatchHistory: boolean;
