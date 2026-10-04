@@ -459,22 +459,35 @@ export async function GET(
       req.nextUrl.searchParams.get('exclude') ||
       req.nextUrl.searchParams.get('id');
 
-    // Filter candidate videos excluding the current video
-    const candidates = Array.from(globalVideos.values())
-      .filter((v) => !currentVideoId || v._id !== currentVideoId);
+    let dbVideos: IVideoItem[] = [];
 
-    // Truly randomize using Fisher-Yates with Math.random() so each call yields a fresh random set
+    // Query stored database manifest of uploaded/saved videos
+    if (fs.existsSync(VIDEOS_METADATA_FILE)) {
+      try {
+        const fileData = fs.readFileSync(VIDEOS_METADATA_FILE, 'utf8');
+        const list = JSON.parse(fileData);
+        if (Array.isArray(list) && list.length > 0) {
+          dbVideos = list;
+        }
+      } catch {}
+    }
+
+    if (dbVideos.length === 0) {
+      dbVideos = Array.from(globalVideos.values());
+    }
+
+    // Filter candidate videos strictly excluding the current video
+    const candidates = dbVideos.filter((v) => !currentVideoId || v._id !== currentVideoId);
+
+    // Truly randomize using Fisher-Yates with Math.random()
     const shuffled = [...candidates];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
 
-    // Select 6 random videos (or all if fewer)
-    const selected = shuffled.slice(0, 6).map((v) => {
-      repairVideoItem(v);
-      return v;
-    });
+    // Select up to 6 random videos from DB
+    const selected = shuffled.slice(0, 6);
 
     return NextResponse.json(
       {
@@ -483,7 +496,7 @@ export async function GET(
       },
       {
         headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
         },
       }
     );
