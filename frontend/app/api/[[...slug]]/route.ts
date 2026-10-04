@@ -90,7 +90,6 @@ interface ISettingsItem {
 }
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'metime_vault_secret_key_32_chars_ok';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
 // Seed sample videos for immediate out-of-the-box private library experience
 const initialVideos: IVideoItem[] = [
@@ -332,24 +331,12 @@ export async function GET(
     return new NextResponse('OK', { status: 200 });
   }
 
-  // 2. Auth: /api/auth/me
+  // 2. Auth: /api/auth/me - DEPRECATED: redirect to backend
   if (path === 'auth/me') {
-    const userAuth = checkRequestAuth(req);
-    if (!userAuth) {
-      return NextResponse.json({
-        success: true,
-        authenticated: false,
-      });
-    }
     return NextResponse.json({
-      success: true,
-      authenticated: true,
-      user: {
-        id: userAuth.userId,
-        username: userAuth.username,
-      },
-      settings: globalSettings,
-    });
+      success: false,
+      error: { message: 'Frontend auth endpoint deprecated. Use backend API.' },
+    }, { status: 410 });
   }
 
   // 3. User Settings: /api/settings
@@ -770,44 +757,20 @@ export async function POST(
   const slug = params?.slug || [];
   const path = slug.join('/');
 
-  // 1. Auth: /api/auth/login
+  // 1. Auth: /api/auth/login - DEPRECATED: redirect to backend
   if (path === 'auth/login') {
-    try {
-      const body = await req.json();
-      const password = body.password;
-
-      if (!password || password !== ADMIN_PASSWORD) {
-        return NextResponse.json(
-          { success: false, error: { message: 'Invalid authentication password.' } },
-          { status: 401 }
-        );
-      }
-
-      const token = generateAuthToken('admin-1', 'admin');
-
-      return NextResponse.json({
-        success: true,
-        token,
-        user: {
-          id: 'admin-1',
-          username: 'admin',
-        },
-        settings: globalSettings,
-      });
-    } catch (e: any) {
-      return NextResponse.json(
-        { success: false, error: { message: 'Invalid request format.' } },
-        { status: 400 }
-      );
-    }
+    return NextResponse.json({
+      success: false,
+      error: { message: 'Frontend auth endpoint deprecated. Please authenticate via backend API.' },
+    }, { status: 410 });
   }
 
-  // 2. Auth: /api/auth/logout
+  // 2. Auth: /api/auth/logout - DEPRECATED: redirect to backend
   if (path === 'auth/logout') {
     return NextResponse.json({
-      success: true,
-      message: 'Logged out successfully.',
-    });
+      success: false,
+      error: { message: 'Frontend auth endpoint deprecated. Please logout via backend API.' },
+    }, { status: 410 });
   }
 
   // 3. Initiate Upload: /api/videos/upload/initiate
