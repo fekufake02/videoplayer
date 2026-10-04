@@ -391,32 +391,63 @@ class ApiClient {
 
   /**
    * Get 5-6 random video suggestions excluding the current playing video
-   * Calls /suggestion route directly or /api/suggestion
+   * Calls backend or Next.js suggestion endpoints with cache busting
    */
   async getSuggestions(currentVideoId?: string): Promise<{ success: boolean; videos: IVideo[] }> {
     const query = currentVideoId ? `?currentVideoId=${encodeURIComponent(currentVideoId)}&t=${Date.now()}` : `?t=${Date.now()}`;
+    
+    // 1. Try standard API client request (/api/suggestion or backend)
     try {
-      // First attempt relative /suggestion route as requested by user
+      const res = await this.request<{ success: boolean; videos: IVideo[] }>(`/suggestion${query}`, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache, no-store' },
+      });
+      if (res && res.success && Array.isArray(res.videos) && res.videos.length > 0) {
+        return res;
+      }
+    } catch (err) {
+      // Continue to fallback
+    }
+
+    // 2. Try root /suggestion route
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
       const response = await fetch(`/suggestion${query}`, {
         method: 'GET',
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache, no-store',
-          ...(typeof window !== 'undefined' && localStorage.getItem('metime_auth_token')
-            ? { Authorization: `Bearer ${localStorage.getItem('metime_auth_token')}` }
-            : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (data && data.success && Array.isArray(data.videos) && data.videos.length > 0) {
+          return data;
+        }
       }
     } catch {}
 
-    // Fallback to /api/suggestion
-    return this.request<{ success: boolean; videos: IVideo[] }>(`/suggestion${query}`, {
-      method: 'GET',
-      headers: { 'Cache-Control': 'no-cache' },
-    });
+    // 3. Try /api/suggestion directly via fetch
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
+      const response = await fetch(`/api/suggestion${query}`, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.success && Array.isArray(data.videos)) {
+          return data;
+        }
+      }
+    } catch {}
+
+    return { success: true, videos: [] };
   }
 
   /**

@@ -53,10 +53,6 @@ export const VideoSuggestions: React.FC<VideoSuggestionsProps> = ({ currentVideo
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (!loading && suggestions.length === 0) {
-    return null;
-  }
-
   return (
     <section className="mt-8 pt-6 border-t border-zinc-800/80 w-full">
       {/* Header */}
@@ -102,6 +98,20 @@ export const VideoSuggestions: React.FC<VideoSuggestionsProps> = ({ currentVideo
               </div>
             </div>
           ))}
+        </div>
+      ) : suggestions.length === 0 ? (
+        <div className="py-8 px-4 text-center bg-zinc-900/30 border border-zinc-850/80 rounded-2xl flex flex-col items-center justify-center gap-3">
+          <p className="text-xs text-zinc-400">
+            Click shuffle to draw random video suggestions from your vault.
+          </p>
+          <button
+            type="button"
+            onClick={() => fetchSuggestions(true)}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-amber-400 hover:text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/20 rounded-xl transition-all"
+          >
+            <Shuffle className="w-3.5 h-3.5" />
+            <span>Shuffle Suggestions</span>
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

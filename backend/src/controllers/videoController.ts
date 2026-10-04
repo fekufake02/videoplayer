@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { z } from 'zod';
 import crypto from 'crypto';
 import path from 'path';
+import mongoose from 'mongoose';
 import { Video } from '../models/Video';
 import { Settings } from '../models/Settings';
 import { b2Service, StorageAccount } from '../services/b2Service';
@@ -686,49 +687,85 @@ export const proxyUpload = async (req: AuthenticatedRequest, res: Response): Pro
 };
 
 /**
- * Get random video suggestions (5-6 videos) excluding the current playing video
+ * Get random video suggestions (6 videos) directly from MongoDB and B2
+ * Truly random sampling across all available videos (400+) using $sample
+ * Not tied to metadata, tags, or categories.
  * GET /api/suggestion?currentVideoId=... or GET /suggestion
  */
 export const getSuggestions = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const currentVideoId = (req.query.currentVideoId || req.query.exclude || req.query.id) as string;
 
-    const query: any = {};
+    const matchQuery: any = {};
     if (currentVideoId) {
-      query._id = { $ne: currentVideoId };
+      try {
+        if (mongoose.Types.ObjectId.isValid(currentVideoId)) {
+          matchQuery._id = { $ne: new mongoose.Types.ObjectId(currentVideoId) };
+        } else {
+          matchQuery._id = { $ne: currentVideoId };
+        }
+      } catch {
+        matchQuery._id = { $ne: currentVideoId };
+      }
     }
 
-    // Fetch candidate videos excluding current video
-    const allVideos = await Video.find(query).limit(50);
+    // 1. Native MongoDB $sample aggregation across ALL 400+ videos in the DB
+    let selected: any[] = [];
+    try {
+      selected = await Video.aggregate([
+        { $match: matchQuery },
+        { $sample: { size: 6 } },
+      ]);
+    } catch (aggErr) {
+      console.warn('Video.aggregate $sample failed, falling back to random skip:', aggErr);
+      const totalCount = await Video.countDocuments(matchQuery);
+      if (totalCount > 0) {
+        const randomSkip = Math.max(0, Math.floor(Math.random() * Math.max(1, totalCount - 6)));
+        selected = await Video.find(matchQuery).skip(randomSkip).limit(6).lean();
+      }
+    }
 
-    // Truly randomize using Fisher-Yates shuffle with Math.random()
-    const shuffled = [...allVideos];
-    for (let i = shuffled.length - 1; i > 0; i--) {
+    // 2. Extra shuffle to guarantee fresh random order on every reload
+    for (let i = selected.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      [selected[i], selected[j]] = [selected[j], selected[i]];
     }
 
-    // Select up to 6 random videos
-    const selected = shuffled.slice(0, 6);
-
-    // Resolve presigned thumbnail URLs
+    // 3. Resolve Backblaze B2 presigned thumbnail URLs
     const videosWithThumbnails = await Promise.all(
       selected.map(async (v) => {
-        const obj = v.toObject();
+        const obj = typeof v.toObject === 'function' ? v.toObject() : { ...v };
+        if (obj._id) {
+          obj._id = obj._id.toString();
+        }
+
+        // If thumbnailKey exists, generate presigned B2 URL
         if (v.thumbnailKey) {
           try {
-            (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
-              v.thumbnailKey,
-              3600,
-              v.thumbnailStorageAccount || v.storageAccount || 'account2'
-            );
-          } catch (e) {}
+            const preferredAccount: StorageAccount = v.thumbnailStorageAccount || v.storageAccount || 'account2';
+            obj.thumbnailUrl = await b2Service.getPresignedStreamUrl(v.thumbnailKey, 3600, preferredAccount);
+          } catch (err1) {
+            try {
+              const fallbackAccount: StorageAccount = (v.thumbnailStorageAccount || v.storageAccount || 'account2') === 'account2' ? 'account1' : 'account2';
+              obj.thumbnailUrl = await b2Service.getPresignedStreamUrl(v.thumbnailKey, 3600, fallbackAccount);
+            } catch (err2) {
+              if (!obj.thumbnailUrl) {
+                obj.thumbnailUrl = `/api/videos/${obj._id}/thumbnail-url`;
+              }
+            }
+          }
+        } else if (!obj.thumbnailUrl) {
+          obj.thumbnailUrl = `/api/videos/${obj._id}/thumbnail-url`;
         }
+
         return obj;
       })
     );
 
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     res.status(200).json({
       success: true,
       videos: videosWithThumbnails,

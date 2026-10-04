@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import mongoose from 'mongoose';
+import { getB2PresignedUrl } from '../../../lib/b2Presign';
 
 // Disk storage for media files to survive process reloads
 const STORAGE_DIR = '/tmp/vault_media_storage';
@@ -453,41 +455,128 @@ export async function GET(
     });
   }
 
-  // 4.1 Suggestions: /api/suggestion or /api/videos/suggestion
-  if (path === 'suggestion' || path === 'videos/suggestion') {
+  // 4.1 Suggestions: /api/suggestion or /api/videos/suggestion or /api/suggestions
+  if (path === 'suggestion' || path === 'videos/suggestion' || path === 'suggestions') {
     const currentVideoId = req.nextUrl.searchParams.get('currentVideoId') ||
       req.nextUrl.searchParams.get('exclude') ||
       req.nextUrl.searchParams.get('id');
 
-    let dbVideos: IVideoItem[] = [];
+    let selected: IVideoItem[] = [];
 
-    // Query stored database manifest of uploaded/saved videos
-    if (fs.existsSync(VIDEOS_METADATA_FILE)) {
+    // Attempt native MongoDB query with $sample if configured
+    const mongoUri = process.env.MONGODB_URI;
+    const isRealMongo = mongoUri && !mongoUri.includes('<cluster>') && !mongoUri.includes('<username>');
+
+    if (isRealMongo) {
       try {
-        const fileData = fs.readFileSync(VIDEOS_METADATA_FILE, 'utf8');
-        const list = JSON.parse(fileData);
-        if (Array.isArray(list) && list.length > 0) {
-          dbVideos = list;
+        if (mongoose.connection.readyState === 0) {
+          await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
         }
-      } catch {}
+        if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+          const matchQuery: any = {};
+          if (currentVideoId) {
+            try {
+              if (mongoose.Types.ObjectId.isValid(currentVideoId)) {
+                matchQuery._id = { $ne: new mongoose.Types.ObjectId(currentVideoId) };
+              } else {
+                matchQuery._id = { $ne: currentVideoId };
+              }
+            } catch {
+              matchQuery._id = { $ne: currentVideoId };
+            }
+          }
+
+          let rawDocs: any[] = [];
+          try {
+            rawDocs = await mongoose.connection.db
+              .collection('videos')
+              .aggregate([
+                { $match: matchQuery },
+                { $sample: { size: 6 } },
+              ])
+              .toArray();
+          } catch {
+            const count = await mongoose.connection.db.collection('videos').countDocuments(matchQuery);
+            if (count > 0) {
+              const skip = Math.max(0, Math.floor(Math.random() * Math.max(1, count - 6)));
+              rawDocs = await mongoose.connection.db.collection('videos').find(matchQuery).skip(skip).limit(6).toArray();
+            }
+          }
+
+          if (rawDocs && rawDocs.length > 0) {
+            selected = await Promise.all(
+              rawDocs.map(async (doc: any) => {
+                const id = doc._id ? doc._id.toString() : '';
+                let thumbUrl = doc.thumbnailUrl;
+                if (doc.thumbnailKey) {
+                  try {
+                    const b2Url = await getB2PresignedUrl(
+                      doc.thumbnailKey,
+                      3600,
+                      doc.thumbnailStorageAccount || doc.storageAccount || 'account2'
+                    );
+                    if (b2Url) thumbUrl = b2Url;
+                  } catch {}
+                }
+                if (!thumbUrl) {
+                  thumbUrl = doc.thumbnailKey ? `/api/upload-receiver?key=${encodeURIComponent(doc.thumbnailKey)}` : undefined;
+                }
+
+                return {
+                  _id: id,
+                  title: doc.title || doc.originalFilename || 'Untitled Video',
+                  originalFilename: doc.originalFilename || 'video.mp4',
+                  storageKey: doc.storageKey || '',
+                  thumbnailKey: doc.thumbnailKey,
+                  thumbnailUrl: thumbUrl,
+                  blurhash: doc.blurhash,
+                  streamUrl: doc.streamUrl || `/api/videos/${id}/raw`,
+                  mimeType: doc.mimeType || 'video/mp4',
+                  size: doc.size || 0,
+                  duration: doc.duration || 0,
+                  createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : new Date().toISOString(),
+                  updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : new Date().toISOString(),
+                  lastPlayedAt: doc.lastPlayedAt ? new Date(doc.lastPlayedAt).toISOString() : undefined,
+                  lastPosition: doc.lastPosition || 0,
+                  playCount: doc.playCount || 0,
+                  favorite: Boolean(doc.favorite),
+                  tags: Array.isArray(doc.tags) ? doc.tags : [],
+                  notes: doc.notes || '',
+                };
+              })
+            );
+          }
+        }
+      } catch (err: any) {
+        console.warn('MongoDB query warning for /api/suggestion:', err.message || err);
+      }
     }
 
-    if (dbVideos.length === 0) {
-      dbVideos = Array.from(globalVideos.values());
+    // Local manifest fallback
+    if (selected.length === 0) {
+      let dbVideos: IVideoItem[] = [];
+      if (fs.existsSync(VIDEOS_METADATA_FILE)) {
+        try {
+          const fileData = fs.readFileSync(VIDEOS_METADATA_FILE, 'utf8');
+          const list = JSON.parse(fileData);
+          if (Array.isArray(list) && list.length > 0) {
+            dbVideos = list;
+          }
+        } catch {}
+      }
+
+      if (dbVideos.length === 0) {
+        dbVideos = Array.from(globalVideos.values());
+      }
+
+      const candidates = dbVideos.filter((v) => !currentVideoId || v._id !== currentVideoId);
+      const shuffled = [...candidates];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      selected = shuffled.slice(0, 6);
     }
-
-    // Filter candidate videos strictly excluding the current video
-    const candidates = dbVideos.filter((v) => !currentVideoId || v._id !== currentVideoId);
-
-    // Truly randomize using Fisher-Yates with Math.random()
-    const shuffled = [...candidates];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-
-    // Select up to 6 random videos from DB
-    const selected = shuffled.slice(0, 6);
 
     return NextResponse.json(
       {
@@ -497,6 +586,8 @@ export async function GET(
       {
         headers: {
           'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+          Pragma: 'no-cache',
+          Expires: '0',
         },
       }
     );

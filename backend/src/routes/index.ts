@@ -3,7 +3,7 @@ import * as authController from '../controllers/authController';
 import * as videoController from '../controllers/videoController';
 import * as settingsController from '../controllers/settingsController';
 import * as thumbnailController from '../controllers/thumbnailController';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, optionalAuth } from '../middleware/auth';
 import { loginLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
@@ -16,7 +16,9 @@ router.get('/auth/me', authController.me);
 // Library & Video Listing Routes
 router.get('/videos', requireAuth, videoController.listVideos);
 router.get('/library/home', requireAuth, videoController.getLibraryHome);
-router.get('/suggestion', requireAuth, videoController.getSuggestions);
+router.get('/suggestion', optionalAuth, videoController.getSuggestions);
+router.get('/suggestions', optionalAuth, videoController.getSuggestions);
+router.get('/videos/suggestion', optionalAuth, videoController.getSuggestions);
 
 // Direct Upload Routes
 router.post('/videos/upload/initiate', requireAuth, videoController.initiateUpload);

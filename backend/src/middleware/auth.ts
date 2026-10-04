@@ -72,3 +72,27 @@ export const requireAuth = (
     },
   });
 };
+
+export const optionalAuth = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void => {
+  if (req.session && req.session.userId) {
+    req.userId = req.session.userId;
+    req.username = req.session.username;
+    return next();
+  }
+
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    const verified = verifyToken(token);
+    if (verified) {
+      req.userId = verified.userId;
+      req.username = verified.username;
+    }
+  }
+
+  return next();
+};
