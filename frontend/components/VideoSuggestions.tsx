@@ -124,6 +124,7 @@ export const VideoSuggestions: React.FC<VideoSuggestionsProps> = ({ currentVideo
               {/* Media Thumbnail Container */}
               <div className="relative aspect-video bg-zinc-950 overflow-hidden flex items-center justify-center">
                 <ThumbnailLoader
+                  videoId={item._id}
                   src={item.thumbnailUrl}
                   blurhash={item.blurhash}
                   fallbackText={item.originalFilename}

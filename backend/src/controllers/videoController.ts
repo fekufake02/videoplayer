@@ -142,10 +142,10 @@ export const listVideos = async (req: AuthenticatedRequest, res: Response): Prom
         }
         if (v.thumbnailKey) {
           try {
-            (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
+            (obj as any).thumbnailUrl = await b2Service.getPresignedThumbnailUrl(
               v.thumbnailKey,
-              3600,
-              v.thumbnailStorageAccount || v.storageAccount || 'account2'
+              v.thumbnailStorageAccount || v.storageAccount || 'account2',
+              7200
             );
           } catch (e) {}
         }
@@ -764,15 +764,10 @@ export const getSuggestions = async (req: AuthenticatedRequest, res: Response): 
         if (v.thumbnailKey) {
           try {
             const preferredAccount: StorageAccount = v.thumbnailStorageAccount || v.storageAccount || 'account2';
-            obj.thumbnailUrl = await b2Service.getPresignedStreamUrl(v.thumbnailKey, 3600, preferredAccount);
-          } catch (err1) {
-            try {
-              const fallbackAccount: StorageAccount = (v.thumbnailStorageAccount || v.storageAccount || 'account2') === 'account2' ? 'account1' : 'account2';
-              obj.thumbnailUrl = await b2Service.getPresignedStreamUrl(v.thumbnailKey, 3600, fallbackAccount);
-            } catch (err2) {
-              if (!obj.thumbnailUrl) {
-                obj.thumbnailUrl = `/api/videos/${obj._id}/thumbnail-url`;
-              }
+            obj.thumbnailUrl = await b2Service.getPresignedThumbnailUrl(v.thumbnailKey, preferredAccount, 7200);
+          } catch {
+            if (!obj.thumbnailUrl) {
+              obj.thumbnailUrl = `/api/videos/${obj._id}/thumbnail-url`;
             }
           }
         } else if (!obj.thumbnailUrl) {

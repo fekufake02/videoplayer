@@ -143,7 +143,7 @@ export const getThumbnailUrl = async (
     }
 
     const accountToUse = video.thumbnailStorageAccount || video.storageAccount || 'account2';
-    const thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600, accountToUse);
+    const thumbnailUrl = await b2Service.getPresignedThumbnailUrl(video.thumbnailKey, accountToUse, 7200);
 
     res.status(200).json({
       success: true,

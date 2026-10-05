@@ -232,8 +232,10 @@ class B2Service {
     }
   }
 
+  private thumbnailAccountCache: Map<string, StorageAccount> = new Map();
+
   /**
-   * Generates a short-lived presigned GET stream URL for video playback
+   * Generates a presigned GET stream URL for video playback
    */
   async getPresignedStreamUrl(
     storageKey: string,
@@ -249,7 +251,43 @@ class B2Service {
   }
 
   /**
+   * Generates a presigned thumbnail URL with account verification and dual-account fallback
+   * Resolves issues where some thumbnails were saved to account1 and some to account2
+   */
+  async getPresignedThumbnailUrl(
+    storageKey: string,
+    preferredAccount?: StorageAccount,
+    expiresInSeconds: number = 7200
+  ): Promise<string> {
+    const primary: StorageAccount = preferredAccount || 'account2';
+    const secondary: StorageAccount = primary === 'account2' ? 'account1' : 'account2';
+
+    if (this.thumbnailAccountCache.has(storageKey)) {
+      const cachedAccount = this.thumbnailAccountCache.get(storageKey)!;
+      return this.getPresignedStreamUrl(storageKey, expiresInSeconds, cachedAccount);
+    }
+
+    try {
+      const existsOnPrimary = await this.checkObjectExists(storageKey, primary);
+      if (existsOnPrimary) {
+        this.thumbnailAccountCache.set(storageKey, primary);
+        return this.getPresignedStreamUrl(storageKey, expiresInSeconds, primary);
+      }
+      const existsOnSecondary = await this.checkObjectExists(storageKey, secondary);
+      if (existsOnSecondary) {
+        this.thumbnailAccountCache.set(storageKey, secondary);
+        return this.getPresignedStreamUrl(storageKey, expiresInSeconds, secondary);
+      }
+    } catch {
+      // In case of error, continue with primary
+    }
+
+    return this.getPresignedStreamUrl(storageKey, expiresInSeconds, primary);
+  }
+
+  /**
    * Generates a presigned GET URL for forcing video file download
+   * Uses clean ASCII filename syntax compatible with Backblaze B2 S3 API
    */
   async getPresignedDownloadUrl(
     storageKey: string,
@@ -258,13 +296,26 @@ class B2Service {
     storageAccount: StorageAccount = 'account2'
   ): Promise<string> {
     const { client, bucketName } = this.getClientAndBucket(storageAccount);
-    const safeFilename = encodeURIComponent(originalFilename.replace(/["\r\n]/g, ''));
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: storageKey,
-      ResponseContentDisposition: `attachment; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`,
-    });
-    return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+    
+    // Sanitize filename for strict Backblaze B2 S3 API Content-Disposition compatibility
+    // B2 rejects extended value syntax (filename*=UTF-8'') with:
+    // "invalid b2-content-disposition: parameter at ... must use valid extended value syntax"
+    const cleanFilename = (originalFilename || 'video.mp4')
+      .replace(/[\r\n"\\;/]/g, '')
+      .replace(/[^\x20-\x7E]/g, '_')
+      .trim() || 'video.mp4';
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: bucketName,
+        Key: storageKey,
+        ResponseContentDisposition: `attachment; filename="${cleanFilename}"`,
+      });
+      return await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+    } catch (err) {
+      console.warn('Failed to sign with ResponseContentDisposition, falling back to standard presigned stream URL:', err);
+      return this.getPresignedStreamUrl(storageKey, expiresInSeconds, storageAccount);
+    }
   }
 
   /**

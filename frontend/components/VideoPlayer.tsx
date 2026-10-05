@@ -977,10 +977,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                     if (res.downloadUrl) {
                       const a = document.createElement('a');
                       a.href = res.downloadUrl;
-                      a.download = video.originalFilename;
+                      a.download = video.originalFilename || 'video.mp4';
+                      a.target = '_blank';
+                      a.rel = 'noopener noreferrer';
                       document.body.appendChild(a);
                       a.click();
-                      document.body.removeChild(a);
+                      setTimeout(() => {
+                        if (document.body.contains(a)) {
+                          document.body.removeChild(a);
+                        }
+                      }, 150);
                     }
                   } catch (err) {
                     console.error('Download error:', err);

@@ -114,10 +114,16 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       if (res.downloadUrl) {
         const a = document.createElement('a');
         a.href = res.downloadUrl;
-        a.download = video.originalFilename;
+        a.download = video.originalFilename || 'video.mp4';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
         document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
+        setTimeout(() => {
+          if (document.body.contains(a)) {
+            document.body.removeChild(a);
+          }
+        }, 150);
       }
     } catch (err) {
       console.error('Download failed:', err);
@@ -150,6 +156,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       >
         {/* Optimized Thumbnail Loader with Blurhash LQIP */}
         <ThumbnailLoader
+          videoId={video._id}
           src={thumbnailUrl || undefined}
           blurhash={video.blurhash}
           fallbackText={video.originalFilename}
