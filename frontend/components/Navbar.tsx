@@ -60,15 +60,32 @@ export const Navbar: React.FC<NavbarProps> = ({
         isVisible ? 'translate-y-0' : '-translate-y-full shadow-none'
       }`}
     >
-      {/* My Vault Brand Logo */}
-      <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-        <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-105 transition-all text-base tracking-tighter">
-          V
-        </div>
-        <span className="font-extrabold text-xl text-white tracking-tight hidden sm:inline">
-          My Vault
-        </span>
-      </Link>
+      {/* My Vault Brand Logo & Navigation */}
+      <div className="flex items-center gap-4 sm:gap-6 shrink-0">
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-105 transition-all text-base tracking-tighter">
+            V
+          </div>
+          <span className="font-extrabold text-xl text-white tracking-tight hidden sm:inline">
+            My Vault
+          </span>
+        </Link>
+        <nav className="flex items-center gap-1 sm:gap-2">
+          <Link
+            href="/"
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/60 transition-all"
+          >
+            Vault
+          </Link>
+          <Link
+            href="/drive"
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-300 hover:text-amber-400 hover:bg-slate-800/60 transition-all flex items-center gap-1.5"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            <span>Drive</span>
+          </Link>
+        </nav>
+      </div>
 
       {/* Optional Search Bar */}
       {onSearchChange !== undefined && (

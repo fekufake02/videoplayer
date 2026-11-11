@@ -205,6 +205,213 @@ const uploadedBlobs: Map<string, UploadBlobRecord> = new Map();
 
 const VIDEOS_METADATA_FILE = path.join(STORAGE_DIR, 'videos_manifest.json');
 
+// Google Drive In-Memory / Manifest Store
+interface IDriveVideoItem {
+  _id: string;
+  driveFileId: string;
+  title: string;
+  originalFilename: string;
+  mimeType: string;
+  size: number;
+  duration?: number;
+  thumbnailKey?: string;
+  thumbnailStorageAccount?: 'account1' | 'account2';
+  thumbnailUrl?: string;
+  blurhash?: string;
+  driveViewUrl?: string;
+  driveStreamUrl?: string;
+  folderId?: string;
+  lastSyncedAt?: string;
+  playCount?: number;
+  favorite?: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const initialDriveVideos: IDriveVideoItem[] = [
+  {
+    _id: 'drive-1',
+    driveFileId: '1q6vL9kGzZ4Z_drive_sample_01',
+    title: 'Project Nebula - 4K Space Exploration',
+    originalFilename: 'project_nebula_4k.mp4',
+    mimeType: 'video/mp4',
+    size: 142600500,
+    duration: 596,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
+    driveViewUrl: 'https://drive.google.com/file/d/1q6vL9kGzZ4Z_drive_sample_01/view',
+    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    folderId: 'default',
+    lastSyncedAt: new Date().toISOString(),
+    playCount: 1,
+    favorite: true,
+    createdAt: new Date(Date.now() - 3600 * 24 * 3 * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    _id: 'drive-2',
+    driveFileId: '1m9pW2bRxY7A_drive_sample_02',
+    title: 'Automotive Kinetic Track Test',
+    originalFilename: 'automotive_kinetic_track.mp4',
+    mimeType: 'video/mp4',
+    size: 198450000,
+    duration: 47,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&auto=format&fit=crop&q=80',
+    driveViewUrl: 'https://drive.google.com/file/d/1m9pW2bRxY7A_drive_sample_02/view',
+    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+    folderId: 'default',
+    lastSyncedAt: new Date().toISOString(),
+    playCount: 0,
+    favorite: false,
+    createdAt: new Date(Date.now() - 3600 * 24 * 2 * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    _id: 'drive-3',
+    driveFileId: '1t4yU8oVxC3B_drive_sample_03',
+    title: 'Blender Open Movie - Sintel Chronicles',
+    originalFilename: 'sintel_chronicles_hd.mp4',
+    mimeType: 'video/mp4',
+    size: 112800000,
+    duration: 888,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop&q=80',
+    driveViewUrl: 'https://drive.google.com/file/d/1t4yU8oVxC3B_drive_sample_03/view',
+    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+    folderId: 'default',
+    lastSyncedAt: new Date().toISOString(),
+    playCount: 4,
+    favorite: false,
+    createdAt: new Date(Date.now() - 3600 * 24 * 1 * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    _id: 'drive-4',
+    driveFileId: '1x5zE6vNqM9K_drive_sample_04',
+    title: 'Sci-Fi VFX - Tears of Steel Remastered',
+    originalFilename: 'tears_of_steel_vfx.mp4',
+    mimeType: 'video/mp4',
+    size: 260300400,
+    duration: 734,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
+    driveViewUrl: 'https://drive.google.com/file/d/1x5zE6vNqM9K_drive_sample_04/view',
+    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    folderId: 'default',
+    lastSyncedAt: new Date().toISOString(),
+    playCount: 2,
+    favorite: true,
+    createdAt: new Date(Date.now() - 3600 * 12 * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    _id: 'drive-5',
+    driveFileId: '1w3rT7kLpB2D_drive_sample_05',
+    title: 'High Velocity Blazes Demo',
+    originalFilename: 'high_velocity_blazes.mp4',
+    mimeType: 'video/mp4',
+    size: 78500200,
+    duration: 15,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=80',
+    driveViewUrl: 'https://drive.google.com/file/d/1w3rT7kLpB2D_drive_sample_05/view',
+    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    folderId: 'default',
+    lastSyncedAt: new Date().toISOString(),
+    playCount: 0,
+    favorite: false,
+    createdAt: new Date(Date.now() - 3600 * 6 * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+const globalDriveVideos: Map<string, IDriveVideoItem> = new Map(initialDriveVideos.map((v) => [v._id, v]));
+const DRIVE_VIDEOS_FILE = path.join(STORAGE_DIR, 'drive_videos_manifest.json');
+
+function saveDriveVideosToDisk() {
+  try {
+    const list = Array.from(globalDriveVideos.values());
+    fs.writeFileSync(DRIVE_VIDEOS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Failed to save drive videos to disk:', err);
+  }
+}
+
+function loadDriveVideosFromDisk() {
+  try {
+    if (fs.existsSync(DRIVE_VIDEOS_FILE)) {
+      const data = fs.readFileSync(DRIVE_VIDEOS_FILE, 'utf8');
+      const list: IDriveVideoItem[] = JSON.parse(data);
+      if (Array.isArray(list) && list.length > 0) {
+        list.forEach((v) => {
+          if (v && v._id) {
+            globalDriveVideos.set(v._id, v);
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load drive videos from disk:', err);
+  }
+}
+
+loadDriveVideosFromDisk();
+
+async function initialDriveFolderSync() {
+  try {
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || '1kRuofHNYbNz62CUy8jlsS2oJvCo5KUvM';
+    const embedUrl = `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(folderId)}#list`;
+    const resp = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
+    if (resp.ok) {
+      const html = await resp.text();
+      const entryRegex = /id="entry-([a-zA-Z0-9_-]{20,})"[\s\S]*?<div class="flip-entry-thumb"><img src="([^"]+)"[\s\S]*?<div class="flip-entry-title">([^<]+)<\/div>/gi;
+      let match;
+      const seenIds = new Set<string>();
+      while ((match = entryRegex.exec(html)) !== null) {
+        const fileId = match[1];
+        const rawThumb = match[2];
+        const rawTitle = match[3].trim();
+        if (/\.(mp4|m4v|mkv|webm|mov|avi|ts)$/i.test(rawTitle) && !seenIds.has(fileId)) {
+          seenIds.add(fileId);
+          const highRes = rawThumb.includes('=s190') ? rawThumb.replace('=s190', '=s1280') : rawThumb;
+          let existing = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === fileId);
+          if (existing) {
+            existing.title = existing.title || rawTitle.replace(/\.[^/.]+$/, '');
+            existing.originalFilename = existing.originalFilename || rawTitle;
+            existing.folderId = folderId;
+          } else {
+            const newId = 'drive-' + crypto.randomBytes(4).toString('hex');
+            const item: IDriveVideoItem = {
+              _id: newId,
+              driveFileId: fileId,
+              title: rawTitle.replace(/\.[^/.]+$/, ''),
+              originalFilename: rawTitle,
+              mimeType: 'video/mp4',
+              size: 1024 * 1024 * 50,
+              thumbnailUrl: highRes,
+              driveViewUrl: `https://drive.google.com/file/d/${fileId}/view`,
+              driveStreamUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
+              folderId,
+              lastSyncedAt: new Date().toISOString(),
+              playCount: 0,
+              favorite: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            globalDriveVideos.set(newId, item);
+          }
+        }
+      }
+      saveDriveVideosToDisk();
+      console.log(`Initial Drive sync completed: ${globalDriveVideos.size} items from folder ${folderId}`);
+    }
+  } catch (err) {
+    console.warn('Initial Drive sync warning:', err);
+  }
+}
+setTimeout(initialDriveFolderSync, 500);
+
 function saveVideosToDisk() {
   try {
     const list = Array.from(globalVideos.values());
@@ -936,6 +1143,185 @@ export async function GET(
     });
   }
 
+  // 11. Drive Video Listing: /api/drive/videos
+  if (path === 'drive/videos') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    const searchParams = req.nextUrl.searchParams;
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '24', 10)));
+    const search = (searchParams.get('search') || '').trim().toLowerCase();
+    const sort = searchParams.get('sort') || 'recentlyAdded';
+
+    let list = Array.from(globalDriveVideos.values());
+
+    if (search) {
+      list = list.filter((v) =>
+        v.title.toLowerCase().includes(search) ||
+        v.originalFilename.toLowerCase().includes(search) ||
+        (v.notes && v.notes.toLowerCase().includes(search))
+      );
+    }
+
+    // Refresh B2 thumbnail URLs for items that have thumbnailKey
+    const resolvedList = await Promise.all(
+      list.map(async (v) => {
+        if (v.thumbnailKey) {
+          try {
+            const b2Url = await getB2PresignedUrl(
+              v.thumbnailKey,
+              3600,
+              v.thumbnailStorageAccount || 'account2'
+            );
+            if (b2Url) {
+              v.thumbnailUrl = b2Url;
+            }
+          } catch {}
+          if (!v.thumbnailUrl) {
+            v.thumbnailUrl = `/api/upload-receiver?key=${encodeURIComponent(v.thumbnailKey)}`;
+          }
+        }
+        return v;
+      })
+    );
+
+    // Sort
+    resolvedList.sort((a, b) => {
+      if (sort === 'title') return a.title.localeCompare(b.title);
+      if (sort === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (sort === 'duration') return (b.duration || 0) - (a.duration || 0);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    const total = resolvedList.length;
+    const skip = (page - 1) * limit;
+    const paginated = resolvedList.slice(skip, skip + limit);
+
+    return NextResponse.json({
+      success: true,
+      videos: paginated,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit) || 1,
+      folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || process.env.GOOGLE_DRIVE_FOLDER_URL || '1kRuofHNYbNz62CUy8jlsS2oJvCo5KUvM',
+    });
+  }
+
+  // 11.1 Drive Video Chunk Stream with Range Header Forwarding: /api/drive/videos/:id/chunk-stream
+  if (slug.length === 4 && slug[0] === 'drive' && slug[1] === 'videos' && (slug[3] === 'chunk-stream' || slug[3] === 'raw')) {
+    const videoId = slug[2];
+    let video = globalDriveVideos.get(videoId);
+    if (!video) {
+      video = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === videoId);
+    }
+    const fileId = video?.driveFileId || videoId;
+    const driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+    const rangeHeader = req.headers.get('range');
+    const forwardHeaders: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    };
+    if (rangeHeader) {
+      forwardHeaders['Range'] = rangeHeader;
+    }
+
+    try {
+      const driveResp = await fetch(driveUrl, { headers: forwardHeaders });
+      const respHeaders = new Headers();
+      respHeaders.set('Accept-Ranges', 'bytes');
+      respHeaders.set('Access-Control-Allow-Origin', '*');
+      respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      respHeaders.set('Access-Control-Allow-Headers', '*');
+
+      const contentType = driveResp.headers.get('content-type') || 'video/mp4';
+      respHeaders.set('Content-Type', contentType);
+
+      const contentRange = driveResp.headers.get('content-range');
+      if (contentRange) respHeaders.set('Content-Range', contentRange);
+
+      const contentLength = driveResp.headers.get('content-length');
+      if (contentLength) respHeaders.set('Content-Length', contentLength);
+
+      return new NextResponse(driveResp.body, {
+        status: driveResp.status,
+        headers: respHeaders,
+      });
+    } catch (e) {
+      return NextResponse.redirect(driveUrl);
+    }
+  }
+
+  // 12. Single Drive Video Stream URL: /api/drive/videos/:id/stream
+  if (slug.length === 4 && slug[0] === 'drive' && slug[1] === 'videos' && slug[3] === 'stream') {
+    const videoId = slug[2];
+    let video = globalDriveVideos.get(videoId);
+    if (!video) {
+      video = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === videoId);
+    }
+
+    if (!video) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Drive video not found' } },
+        { status: 404 }
+      );
+    }
+
+    const fileId = video.driveFileId;
+    const directStreamUrl = `/api/drive/videos/${fileId}/chunk-stream`;
+    const embedPreviewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+
+    return NextResponse.json({
+      success: true,
+      driveFileId: fileId,
+      streamUrl: directStreamUrl,
+      rawDownloadUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
+      embedPreviewUrl,
+      thumbnailUrl: video.thumbnailUrl,
+      title: video.title,
+    });
+  }
+
+  // 13. Single Drive Video Details: /api/drive/videos/:id
+  if (slug.length === 3 && slug[0] === 'drive' && slug[1] === 'videos') {
+    const videoId = slug[2];
+    let video = globalDriveVideos.get(videoId);
+    if (!video) {
+      video = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === videoId);
+    }
+
+    if (!video) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Drive video not found' } },
+        { status: 404 }
+      );
+    }
+
+    if (video.thumbnailKey) {
+      try {
+        const b2Url = await getB2PresignedUrl(
+          video.thumbnailKey,
+          3600,
+          video.thumbnailStorageAccount || 'account2'
+        );
+        if (b2Url) video.thumbnailUrl = b2Url;
+      } catch {}
+      if (!video.thumbnailUrl) {
+        video.thumbnailUrl = `/api/upload-receiver?key=${encodeURIComponent(video.thumbnailKey)}`;
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      video,
+    });
+  }
+
   return NextResponse.json(
     { success: false, error: { message: `Route not found: ${path}` } },
     { status: 404 }
@@ -1269,6 +1655,206 @@ export async function POST(
       return NextResponse.json(
         { success: false, error: { message: 'Failed to process batch thumbnail request' } },
         { status: 400 }
+      );
+    }
+  }
+
+  // 10. Sync Google Drive Folder: /api/drive/sync
+  if (path === 'drive/sync') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    try {
+      const body = await req.json().catch(() => ({}));
+      const folderInput = body.folderUrl || body.folderId || process.env.GOOGLE_DRIVE_FOLDER_ID || process.env.GOOGLE_DRIVE_FOLDER_URL || '1kRuofHNYbNz62CUy8jlsS2oJvCo5KUvM';
+
+      // Parse folder ID
+      let folderId = '1kRuofHNYbNz62CUy8jlsS2oJvCo5KUvM';
+      const folderMatch = (folderInput || '').match(/\/folders\/([a-zA-Z0-9_-]+)/);
+      if (folderMatch && folderMatch[1]) {
+        folderId = folderMatch[1];
+      } else if (/^[a-zA-Z0-9_-]{15,64}$/.test(folderInput.trim())) {
+        folderId = folderInput.trim();
+      }
+
+      // Try fetching public Google Drive folder HTML
+      const seenIds = new Set<string>();
+      let fetchedFiles: { id: string; title: string; filename: string; mimeType: string; thumbUrl?: string }[] = [];
+
+      try {
+        const embedUrl = `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(folderId)}#list`;
+        const resp = await fetch(embedUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+        });
+        if (resp.ok) {
+          const html = await resp.text();
+          const entryRegex = /id="entry-([a-zA-Z0-9_-]{20,})"[\s\S]*?<div class="flip-entry-thumb"><img src="([^"]+)"[\s\S]*?<div class="flip-entry-title">([^<]+)<\/div>/gi;
+          let match;
+          while ((match = entryRegex.exec(html)) !== null) {
+            const fileId = match[1];
+            const rawThumb = match[2];
+            const rawTitle = match[3].trim();
+            if (/\.(mp4|m4v|mkv|webm|mov|avi|ts)$/i.test(rawTitle) && !seenIds.has(fileId)) {
+              seenIds.add(fileId);
+              const highRes = rawThumb.includes('=s190') ? rawThumb.replace('=s190', '=s1280') : rawThumb;
+              fetchedFiles.push({
+                id: fileId,
+                title: rawTitle.replace(/\.[^/.]+$/, ''),
+                filename: rawTitle,
+                mimeType: 'video/mp4',
+                thumbUrl: highRes,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Sync embedded folder parser error:', e);
+      }
+
+      // If fetched files found, add or update them
+      let newCount = 0;
+      if (fetchedFiles.length > 0) {
+        for (const f of fetchedFiles) {
+          let existing = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === f.id);
+          if (existing) {
+            existing.title = existing.title || f.title;
+            existing.originalFilename = existing.originalFilename || f.filename;
+            existing.folderId = folderId;
+            existing.lastSyncedAt = new Date().toISOString();
+          } else {
+            newCount++;
+            const newId = 'drive-' + crypto.randomBytes(4).toString('hex');
+            const item: IDriveVideoItem = {
+              _id: newId,
+              driveFileId: f.id,
+              title: f.title,
+              originalFilename: f.filename,
+              mimeType: f.mimeType,
+              size: 1024 * 1024 * 50,
+              thumbnailUrl: f.thumbUrl || `https://drive.google.com/thumbnail?id=${f.id}&sz=w1280`,
+              driveViewUrl: `https://drive.google.com/file/d/${f.id}/view`,
+              driveStreamUrl: `https://drive.google.com/uc?export=download&id=${f.id}`,
+              folderId,
+              lastSyncedAt: new Date().toISOString(),
+              playCount: 0,
+              favorite: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            globalDriveVideos.set(newId, item);
+          }
+        }
+      }
+
+      saveDriveVideosToDisk();
+
+      const allDriveVideos = Array.from(globalDriveVideos.values());
+      return NextResponse.json({
+        success: true,
+        message: `Synced ${allDriveVideos.length} videos from Google Drive folder (${newCount} new).`,
+        folderId,
+        syncedCount: allDriveVideos.length,
+        newCount,
+        videos: allDriveVideos,
+      });
+    } catch (e: any) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Failed to sync Google Drive folder' } },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 11. Initiate Drive Thumbnail Upload: /api/drive/thumbnails/upload/initiate
+  if (path === 'drive/thumbnails/upload/initiate') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    try {
+      const body = await req.json().catch(() => ({}));
+      const driveFileId = body.driveFileId || crypto.randomBytes(4).toString('hex');
+      const filename = body.filename || 'thumbnail.webp';
+      const randomUuid = crypto.randomUUID();
+      const storageKey = `thumbnails/drive/${driveFileId}/${randomUuid}_${filename}`;
+      const uploadUrl = `/api/upload-receiver?key=${encodeURIComponent(storageKey)}`;
+
+      return NextResponse.json({
+        success: true,
+        uploadUrl,
+        storageKey,
+        storageAccount: 'account2',
+        driveFileId,
+      });
+    } catch (e: any) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Failed to initiate Drive thumbnail upload' } },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 12. Attach Drive Thumbnail: /api/drive/videos/:id/thumbnail
+  if (slug.length === 4 && slug[0] === 'drive' && slug[1] === 'videos' && slug[3] === 'thumbnail') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    const videoId = slug[2];
+    let video = globalDriveVideos.get(videoId);
+    if (!video) {
+      video = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === videoId);
+    }
+
+    if (!video) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Drive video not found' } },
+        { status: 404 }
+      );
+    }
+
+    try {
+      const body = await req.json();
+      video.thumbnailKey = body.thumbnailKey;
+      if (body.blurhash) video.blurhash = body.blurhash;
+      video.thumbnailStorageAccount = body.storageAccount || 'account2';
+
+      // Check presigned B2 URL
+      let thumbUrl = `/api/upload-receiver?key=${encodeURIComponent(body.thumbnailKey)}`;
+      try {
+        const b2Url = await getB2PresignedUrl(body.thumbnailKey, 3600, video.thumbnailStorageAccount);
+        if (b2Url) thumbUrl = b2Url;
+      } catch {}
+
+      video.thumbnailUrl = thumbUrl;
+      video.updatedAt = new Date().toISOString();
+
+      saveDriveVideosToDisk();
+
+      return NextResponse.json({
+        success: true,
+        video,
+        thumbnailUrl: thumbUrl,
+      });
+    } catch (e: any) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Failed to attach custom thumbnail' } },
+        { status: 500 }
       );
     }
   }

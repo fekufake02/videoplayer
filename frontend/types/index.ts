@@ -58,3 +58,35 @@ export interface VideoListResponse {
   page: number;
   totalPages: number;
 }
+
+export interface IDriveVideo {
+  _id: string;
+  driveFileId: string;
+  title: string;
+  originalFilename: string;
+  mimeType: string;
+  size: number;
+  duration?: number;
+  thumbnailKey?: string;
+  thumbnailStorageAccount?: 'account1' | 'account2';
+  thumbnailUrl?: string;
+  blurhash?: string;
+  driveViewUrl?: string;
+  driveStreamUrl?: string;
+  folderId?: string;
+  lastSyncedAt?: string;
+  playCount?: number;
+  favorite?: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriveVideoListResponse {
+  success: boolean;
+  videos: IDriveVideo[];
+  total: number;
+  page: number;
+  totalPages: number;
+  folderId?: string;
+}

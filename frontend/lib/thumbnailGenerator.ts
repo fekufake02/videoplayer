@@ -567,3 +567,86 @@ export async function batchGenerateThumbnails(
     failed: failedCount,
   };
 }
+
+/**
+ * Space-optimized thumbnail generator for Drive videos (default: 20 seconds timestamp)
+ * Extracts 16:9 frame at 20s timestamp, compresses to WebP (<20KB), and uploads to Backblaze B2 (account2)
+ */
+export async function generateAndUploadDriveThumbnail(
+  videoSource: string | HTMLVideoElement | HTMLCanvasElement,
+  originalFilename: string,
+  driveFileId: string,
+  timestamp: number = 20
+): Promise<{ thumbnailKey: string; blurhash?: string; thumbnailUrl?: string } | null> {
+  try {
+    const rawCanvas = await extractVideoFrame(videoSource, timestamp, originalFilename);
+
+    // Resize to space-optimized dimensions: 480x270 (matching vault's getOptimalThumbnailDimensions)
+    const optCanvas = document.createElement('canvas');
+    optCanvas.width = 480;
+    optCanvas.height = 270;
+    const ctx = optCanvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(rawCanvas, 0, 0, 480, 270);
+    }
+    const finalCanvas = ctx ? optCanvas : rawCanvas;
+
+    // Generate blurhash
+    let blurhash: string | undefined;
+    try {
+      blurhash = await generateBlurhashFromCanvas(finalCanvas);
+    } catch {}
+
+    // Compress to WebP (<18KB)
+    const blob = await canvasToWebP(finalCanvas, 0.78);
+
+    // Initiate B2 upload URL
+    const safeBase = (originalFilename || 'drive_video').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
+    const initRes = await api.initiateDriveThumbnailUpload({
+      filename: `${safeBase}_20s.webp`,
+      mimeType: 'image/webp',
+      driveFileId,
+    });
+
+    if (!initRes?.success || !initRes.uploadUrl || !initRes.storageKey) {
+      throw new Error('Could not get B2 upload URL');
+    }
+
+    // Direct PUT to B2 with proxy fallback
+    try {
+      const uploadResp = await fetch(initRes.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/webp' },
+        body: blob,
+      });
+      if (!uploadResp.ok) throw new Error(`B2 response ${uploadResp.status}`);
+    } catch (err) {
+      const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : '/api';
+      const token = typeof window !== 'undefined' ? localStorage.getItem('metime_auth_token') : null;
+      const headers: Record<string, string> = { 'Content-Type': 'image/webp' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      await fetch(`${backendBase}/videos/upload/proxy?key=${encodeURIComponent(initRes.storageKey)}&storageAccount=account2`, {
+        method: 'PUT',
+        headers,
+        body: blob,
+      });
+    }
+
+    // Attach to DriveVideo
+    const attachRes = await api.attachDriveThumbnail(driveFileId, {
+      thumbnailKey: initRes.storageKey,
+      blurhash,
+      storageAccount: 'account2',
+    });
+
+    return {
+      thumbnailKey: initRes.storageKey,
+      blurhash,
+      thumbnailUrl: attachRes.thumbnailUrl,
+    };
+  } catch (err) {
+    console.error('Error generating 20s Drive thumbnail:', err);
+    return null;
+  }
+}
+

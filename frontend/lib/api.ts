@@ -1,4 +1,4 @@
-import { IVideo, ISettings, HomeSections, VideoListResponse } from '../types';
+import { IVideo, ISettings, HomeSections, VideoListResponse, IDriveVideo, DriveVideoListResponse } from '../types';
 
 const API_BASE_URL = typeof window !== 'undefined'
   ? (process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : '/api')
@@ -480,6 +480,82 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ currentPassword, newPassword }),
     });
+  }
+
+  // ── Google Drive Public Video Gallery & B2 Custom Thumbnails ──
+
+  async listDriveVideos(params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    sort?: string;
+  } = {}): Promise<DriveVideoListResponse> {
+    const query = new URLSearchParams();
+    if (params.page) query.append('page', params.page.toString());
+    if (params.limit) query.append('limit', params.limit.toString());
+    if (params.search) query.append('search', params.search);
+    if (params.sort) query.append('sort', params.sort);
+
+    const queryString = query.toString();
+    const endpoint = `/drive/videos${queryString ? `?${queryString}` : ''}`;
+    return this.request<DriveVideoListResponse>(endpoint, { method: 'GET' });
+  }
+
+  async syncDriveFolder(folderUrl?: string): Promise<{
+    success: boolean;
+    message: string;
+    folderId: string;
+    syncedCount: number;
+    newCount: number;
+    videos: IDriveVideo[];
+  }> {
+    return this.request('/drive/sync', {
+      method: 'POST',
+      body: JSON.stringify({ folderUrl }),
+    });
+  }
+
+  async getDriveVideoDetails(id: string): Promise<{ success: boolean; video: IDriveVideo }> {
+    return this.request(`/drive/videos/${id}`, { method: 'GET' });
+  }
+
+  async initiateDriveThumbnailUpload(payload: {
+    filename?: string;
+    mimeType?: string;
+    driveFileId?: string;
+  }): Promise<{
+    success: boolean;
+    uploadUrl: string;
+    storageKey: string;
+    storageAccount: string;
+    driveFileId: string;
+  }> {
+    return this.request('/drive/thumbnails/upload/initiate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async attachDriveThumbnail(id: string, payload: {
+    thumbnailKey: string;
+    blurhash?: string;
+    storageAccount?: string;
+  }): Promise<{ success: boolean; video: IDriveVideo; thumbnailUrl: string }> {
+    return this.request(`/drive/videos/${id}/thumbnail`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getDriveStreamUrl(id: string): Promise<{
+    success: boolean;
+    driveFileId: string;
+    streamUrl: string;
+    embedPreviewUrl: string;
+    thumbnailUrl?: string;
+    title: string;
+  }> {
+    return this.request(`/drive/videos/${id}/stream`, { method: 'GET' });
   }
 }
 

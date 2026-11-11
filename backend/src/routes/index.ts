@@ -3,6 +3,7 @@ import * as authController from '../controllers/authController';
 import * as videoController from '../controllers/videoController';
 import * as settingsController from '../controllers/settingsController';
 import * as thumbnailController from '../controllers/thumbnailController';
+import * as driveController from '../controllers/driveController';
 import { requireAuth, optionalAuth } from '../middleware/auth';
 import { loginLimiter } from '../middleware/rateLimiter';
 
@@ -50,5 +51,14 @@ router.post('/settings/clear-history', requireAuth, settingsController.clearHist
 
 // Admin Password Management (requires authentication)
 router.post('/settings/admin/update-password', requireAuth, settingsController.updateAdminPassword);
+
+// Google Drive Public Video Gallery & B2 Custom Thumbnail Routes
+router.get('/drive/videos', requireAuth, driveController.listDriveVideos);
+router.post('/drive/sync', requireAuth, driveController.syncDriveFolder);
+router.get('/drive/videos/:id', requireAuth, driveController.getDriveVideoDetails);
+router.post('/drive/thumbnails/upload/initiate', requireAuth, driveController.initiateDriveThumbnailUpload);
+router.post('/drive/videos/:id/thumbnail', requireAuth, driveController.attachDriveThumbnail);
+router.get('/drive/videos/:id/stream', requireAuth, driveController.getDriveStreamUrl);
+router.get('/drive/videos/:id/chunk-stream', driveController.streamDriveVideoChunk);
 
 export default router;
