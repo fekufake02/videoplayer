@@ -13,7 +13,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 export const listDriveVideos = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
-    const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '24', 10)));
+    const limit = Math.min(1000, Math.max(1, parseInt((req.query.limit as string) || '500', 10)));
     const search = ((req.query.search as string) || '').trim();
     const sort = (req.query.sort as string) || 'recentlyAdded';
 
