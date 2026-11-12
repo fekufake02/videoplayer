@@ -2,6 +2,12 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { BufferedRange } from '../hooks/useBufferedSegments';
+import {
+  getFrameIndexForTime,
+  getContactSheetSpriteStyle,
+  calculatePreviewClampedX,
+  DEFAULT_CONTACT_SHEET_CONFIG,
+} from '../lib/contactSheet';
 
 interface BufferingIndicatorProps {
   bufferedRanges: BufferedRange[];
@@ -11,6 +17,10 @@ interface BufferingIndicatorProps {
   isBuffering: boolean;
   onSeek: (targetTime: number) => void;
   maxBufferAhead?: number;
+  contactSheetUrl?: string | null;
+  totalFrames?: number;
+  cols?: number;
+  rows?: number;
 }
 
 export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
@@ -20,6 +30,10 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
   percentBuffered: _percentBuffered,
   isBuffering: _isBuffering,
   onSeek,
+  contactSheetUrl,
+  totalFrames = 10,
+  cols = 5,
+  rows = 2,
 }) => {
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
@@ -160,17 +174,59 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
     >
-      {/* Time hover / touch scrubber tooltip */}
-      {(hoverPosition !== null && hoverTime !== null) && (
-        <div
-          className="absolute bottom-full mb-2 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
-          style={{ left: `${hoverPosition}px` }}
-        >
-          <div className="bg-zinc-900/95 backdrop-blur-md text-amber-400 text-[11px] sm:text-xs font-mono font-bold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg border border-amber-400/30 shadow-2xl whitespace-nowrap">
-            {formatTime(hoverTime)}
+      {/* Timeline Thumbnail Preview or Time Tooltip */}
+      {hoverPosition !== null && hoverTime !== null && (() => {
+        const containerWidth = progressBarRef.current?.clientWidth || 300;
+        const previewWidth = 140;
+        const previewHeight = 78;
+        const clampedX = calculatePreviewClampedX(hoverPosition, containerWidth, previewWidth);
+
+        if (contactSheetUrl) {
+          const frameIndex = getFrameIndexForTime(hoverTime, duration, totalFrames);
+          const sprite = getContactSheetSpriteStyle(frameIndex, {
+            cols,
+            rows,
+            totalFrames,
+            tileWidth: previewWidth,
+            tileHeight: previewHeight,
+          });
+
+          return (
+            <div
+              className="absolute bottom-full mb-3 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
+              style={{ left: `${clampedX}px` }}
+            >
+              <div className="w-[140px] h-[78px] rounded-xl overflow-hidden border border-amber-400/50 shadow-2xl bg-zinc-950 relative flex flex-col justify-end">
+                {/* Contact sheet sprite background */}
+                <div
+                  className="absolute inset-0 bg-no-repeat"
+                  style={{
+                    backgroundImage: `url(${contactSheetUrl})`,
+                    backgroundPosition: sprite.backgroundPosition,
+                    backgroundSize: sprite.backgroundSize,
+                  }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
+                {/* Timestamp pill inside preview */}
+                <div className="relative z-10 mx-auto mb-1 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md border border-white/10 text-amber-300 font-mono text-[10px] font-bold">
+                  {formatTime(hoverTime)}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div
+            className="absolute bottom-full mb-2 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
+            style={{ left: `${hoverPosition}px` }}
+          >
+            <div className="bg-zinc-900/95 backdrop-blur-md text-amber-400 text-[11px] sm:text-xs font-mono font-bold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg border border-amber-400/30 shadow-2xl whitespace-nowrap">
+              {formatTime(hoverTime)}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Progress Track Bar */}
       <div

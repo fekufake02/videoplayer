@@ -1,0 +1,8 @@
+{
+  "name": "My Vault - Media & Video Player",
+  "description": "An elegant, private video vault and streaming player with Backblaze B2 and Google Drive integration.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

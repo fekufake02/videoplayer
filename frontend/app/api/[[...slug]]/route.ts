@@ -720,6 +720,7 @@ export async function GET(
     if (isRealMongo) {
       try {
         if (mongoose.connection.readyState === 0) {
+          mongoose.set('bufferCommands', false);
           await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
         }
         if (mongoose.connection.readyState === 1 && mongoose.connection.db) {

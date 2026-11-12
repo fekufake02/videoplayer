@@ -4,7 +4,12 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { IVideo } from '../types';
 import { api } from '../lib/api';
-import mpegts from 'mpegts.js';
+let mpegts: any = null;
+if (typeof window !== 'undefined') {
+  try {
+    mpegts = require('mpegts.js');
+  } catch {}
+}
 import Hls from 'hls.js';
 import { useBufferedSegments } from '../hooks/useBufferedSegments';
 import { BufferingIndicator } from './BufferingIndicator';
@@ -29,7 +34,12 @@ import {
   AlertCircle,
   Download,
   Rotate3d,
+  Settings as SettingsIcon,
+  Sliders,
 } from 'lucide-react';
+import { usePip } from '../context/PipContext';
+import { getCachedContactSheet, generateContactSheet } from '../lib/contactSheetGenerator';
+import { PlayerSettingsMenu, AspectRatioOption, AudioPreset } from './PlayerSettingsMenu';
 import Link from 'next/link';
 
 interface VideoPlayerProps {
@@ -97,6 +107,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [hasRecordedPlay, setHasRecordedPlay] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<AspectRatioOption>('original');
+  const [skipInterval, setSkipInterval] = useState<number>(10);
+  const [autoPlayNext, setAutoPlayNext] = useState<boolean>(true);
+  const [isLooping, setIsLooping] = useState<boolean>(false);
+  const [audioPreset, setAudioPreset] = useState<AudioPreset>('normal');
+  const [sleepTimer, setSleepTimer] = useState<number | null>(null);
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!sleepTimer || sleepTimer <= 0) return;
+    const timer = setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      }
+      setSleepTimer(null);
+    }, sleepTimer * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [sleepTimer]);
+
+  // Picture-in-Picture & Floating Player
+  const { startFloatingPip } = usePip();
+
+  // Timeline Thumbnail Contact Sheet
+  const [contactSheetUrl, setContactSheetUrl] = useState<string | null>(() =>
+    getCachedContactSheet(video._id)
+  );
+
+  useEffect(() => {
+    if (video._id && !contactSheetUrl && duration > 0 && activeSrc) {
+      generateContactSheet(activeSrc, duration, video._id)
+        .then((url) => {
+          if (url) setContactSheetUrl(url);
+        })
+        .catch(() => {});
+    }
+  }, [video._id, duration, activeSrc, contactSheetUrl]);
 
   // Zoom & Pan State (1.0x to 4.0x / 100% to 400%)
   const [zoomScale, setZoomScale] = useState(1.0);
@@ -319,20 +367,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      videoRef.current
-        .play()
-        .then(() => {
-          setIsPlaying(true);
-          setShowControls(true);
-          setHasPlaybackError(false);
-        })
-        .catch((err) => {
-          console.warn('Playback error:', err);
-          setHasPlaybackError(true);
-        });
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            setIsWaiting(false);
+            setIsMediaReady(true);
+            setShowControls(true);
+            setHasPlaybackError(false);
+          })
+          .catch((err) => {
+            console.warn('Playback error:', err);
+            if (err.name === 'NotAllowedError' && videoRef.current) {
+              videoRef.current.muted = true;
+              setIsMuted(true);
+              videoRef.current.play().then(() => {
+                setIsPlaying(true);
+                setIsWaiting(false);
+                setIsMediaReady(true);
+              }).catch(() => {
+                setHasPlaybackError(true);
+              });
+            } else {
+              setHasPlaybackError(true);
+            }
+          });
+      }
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
+      setIsWaiting(false);
       setShowControls(true);
     }
   }, []);
@@ -649,7 +714,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       lastTapRef.current = { time: 0, x: 0 };
     } else {
       lastTapRef.current = { time: now, x: clientX };
-      setShowControls((prev) => !prev);
+      togglePlay();
     }
   };
 
@@ -672,6 +737,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     if (!videoRef.current) return;
     const cur = videoRef.current.currentTime;
     setCurrentTime(cur);
+
+    if (isWaiting) setIsWaiting(false);
+    if (!isMediaReady) setIsMediaReady(true);
 
     if (Math.floor(cur) % 10 === 0) {
       saveProgress(cur);
@@ -775,14 +843,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const togglePictureInPicture = async () => {
     if (!videoRef.current) return;
     try {
-      if (document.pictureInPictureElement) {
+      if (typeof document !== 'undefined' && document.pictureInPictureElement) {
         await document.exitPictureInPicture();
-      } else if (document.pictureInPictureEnabled) {
-        await videoRef.current.requestPictureInPicture();
+        return;
       }
+      if (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof videoRef.current.requestPictureInPicture === 'function') {
+        try {
+          await videoRef.current.requestPictureInPicture();
+          return;
+        } catch (e) {
+          console.warn('Native PiP not granted, falling back to in-app floating player:', e);
+        }
+      }
+      // Floating In-App Mini Player Fallback
+      startFloatingPip({
+        id: video._id,
+        title: video.title,
+        src: activeSrc,
+        poster: resolvedThumbnail,
+        currentTime: videoRef.current.currentTime || currentTime,
+        duration: duration || video.duration || 0,
+        isPlaying: !videoRef.current.paused,
+      });
     } catch (e) {
       console.warn('Picture in Picture error:', e);
     }
+  };
+
+  const startFloatingMini = () => {
+    if (!videoRef.current) return;
+    startFloatingPip({
+      id: video._id,
+      title: video.title,
+      src: activeSrc,
+      poster: resolvedThumbnail,
+      currentTime: videoRef.current.currentTime || currentTime,
+      duration: duration || video.duration || 0,
+      isPlaying: !videoRef.current.paused,
+    });
   };
 
   const formatTime = (secs: number) => {
@@ -835,21 +933,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           cursor: zoomScale > 1.05 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default',
         }}
       >
-        {/* Instant Poster/Thumbnail Backdrop (Eliminates black screen void before first frame) */}
-        {resolvedThumbnail && !isPlaying && (
-          <img
-            src={resolvedThumbnail}
-            alt={video.title}
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none z-0"
-          />
-        )}
-
         <video
           ref={videoRef}
           src={activeSrc}
           poster={resolvedThumbnail}
-          crossOrigin="anonymous"
-          preload="auto"
+          preload="metadata"
           onLoadedMetadata={handleLoadedMetadata}
           onDurationChange={() => {
             if (videoRef.current && videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
@@ -865,6 +953,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           onCanPlayThrough={handleMediaReady}
           onPlaying={() => {
             handleMediaReady();
+            setIsWaiting(false);
             setIsPlaying(true);
             resetControlsTimeout();
           }}
@@ -880,7 +969,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             if (videoRef.current) saveProgress(videoRef.current.duration);
           }}
           onError={handleVideoError}
-          className="relative z-1 w-full h-full object-contain pointer-events-none"
+          className={`relative z-1 w-full h-full pointer-events-none transition-all ${
+            aspectRatio === 'fill' ? 'object-cover' : 'object-contain'
+          }`}
+          loop={isLooping}
           playsInline
         />
       </div>
@@ -928,32 +1020,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         </div>
       )}
 
-      {/* Center Buffering Spinner or Central Play / Pause Button */}
-      {(!isMediaReady || isWaiting) ? (
+      {/* Center Buffering Spinner (only when playing and buffering) */}
+      {isWaiting && isPlaying && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-30">
           <div className="flex flex-col items-center justify-center bg-black/50 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-2xl animate-fade-in">
             <div className="w-10 h-10 sm:w-14 sm:h-14 border-3 sm:border-4 border-zinc-700/60 border-t-amber-400 rounded-full animate-spin shadow-xl" />
           </div>
         </div>
-      ) : (
-        (!isPlaying || showControls) && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-fade-in">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePlay();
-              }}
-              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-              className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-amber-400 hover:bg-amber-300 text-black flex items-center justify-center shadow-[0_0_30px_rgba(251,191,36,0.35)] hover:scale-105 active:scale-95 transition-all pointer-events-auto cursor-pointer border-2 border-amber-300/60"
-            >
-              {isPlaying ? (
-                <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
-              ) : (
-                <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
-              )}
-            </button>
-          </div>
-        )
+      )}
+
+      {/* Central Play / Pause Button */}
+      {(!isPlaying || showControls) && !(isWaiting && isPlaying) && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-fade-in">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+            className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-amber-400 hover:bg-amber-300 text-black flex items-center justify-center shadow-[0_0_30px_rgba(251,191,36,0.35)] hover:scale-105 active:scale-95 transition-all pointer-events-auto cursor-pointer border-2 border-amber-300/60"
+          >
+            {isPlaying ? (
+              <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
+            ) : (
+              <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current translate-x-0.5" />
+            )}
+          </button>
+        </div>
       )}
 
       {/* Codec Error Overlay for HEVC / H.265 / Unsupported Browser Codec */}
@@ -1154,6 +1247,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                     isBuffering={bufferingState.isBuffering}
                     onSeek={handleDirectSeek}
                     maxBufferAhead={120}
+                    contactSheetUrl={contactSheetUrl}
                   />
                 </div>
                 <div className="flex items-center gap-1.5 min-w-[28px] sm:min-w-[40px]">
@@ -1257,39 +1351,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 </button>
               </div>
 
-              {/* Playback Speed */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSpeedMenu((prev) => !prev)}
-                  className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-md sm:rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-200 text-[10px] sm:text-xs font-mono font-bold flex items-center gap-1 active:scale-95 cursor-pointer"
-                  title="Playback Speed"
-                >
-                  <Gauge className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-400" />
-                  <span>{playbackSpeed.toFixed(1)}x</span>
-                </button>
-
-                {showSpeedMenu && (
-                  <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 border border-zinc-700 rounded-xl p-1.5 shadow-2xl backdrop-blur-md flex flex-col gap-1 min-w-[100px] z-50 animate-fade-in pointer-events-auto">
-                    <div className="text-[10px] uppercase font-bold text-zinc-400 px-2 py-0.5 border-b border-zinc-800">
-                      Speed
-                    </div>
-                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => changePlaybackSpeed(s)}
-                        className={`px-2.5 py-1 text-xs text-left font-mono rounded-lg transition-colors flex items-center justify-between cursor-pointer ${
-                          Math.abs(s - playbackSpeed) < 0.05
-                            ? 'bg-amber-400 text-black font-extrabold'
-                            : 'text-zinc-300 hover:bg-zinc-800'
-                        }`}
-                      >
-                        <span>{s.toFixed(2)}x</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
               {/* Picture-in-Picture */}
               <button
                 onClick={togglePictureInPicture}
@@ -1298,6 +1359,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
               >
                 <PictureInPicture className="w-3.5 h-3.5" />
               </button>
+
+              {/* Categorized Settings Menu Trigger */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsSettingsOpen((prev) => !prev)}
+                  title="Playback Settings"
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center transition-colors active:scale-95 cursor-pointer ${
+                    isSettingsOpen
+                      ? 'bg-indigo-500 text-white shadow-md'
+                      : 'text-zinc-300 hover:text-white hover:bg-zinc-800/60'
+                  }`}
+                >
+                  <SettingsIcon className={`w-3.5 h-3.5 ${isSettingsOpen ? 'rotate-45' : ''} transition-transform`} />
+                </button>
+
+                {/* Modern Floating Categorized Settings Menu */}
+                <PlayerSettingsMenu
+                  isOpen={isSettingsOpen}
+                  onClose={() => setIsSettingsOpen(false)}
+                  playbackSpeed={playbackSpeed}
+                  onPlaybackSpeedChange={(spd) => changePlaybackSpeed(spd)}
+                  skipInterval={skipInterval}
+                  onSkipIntervalChange={(sec) => setSkipInterval(sec)}
+                  autoPlayNext={autoPlayNext}
+                  onAutoPlayNextToggle={() => setAutoPlayNext((prev) => !prev)}
+                  isLooping={isLooping}
+                  onLoopToggle={() => setIsLooping((prev) => !prev)}
+                  aspectRatio={aspectRatio}
+                  onAspectRatioChange={(ratio) => setAspectRatio(ratio)}
+                  audioPreset={audioPreset}
+                  onAudioPresetChange={(p) => setAudioPreset(p)}
+                  sleepTimer={sleepTimer}
+                  onSleepTimerChange={(t) => setSleepTimer(t)}
+                  subtitlesEnabled={subtitlesEnabled}
+                  onSubtitlesToggle={() => setSubtitlesEnabled((prev) => !prev)}
+                  videoInfo={{
+                    filename: video.originalFilename || video.title || 'video.mp4',
+                    format: video.originalFilename?.split('.').pop()?.toUpperCase() || 'MP4',
+                    resolution: '1920x1080 (HD)',
+                    fileSize: video.size ? `${(video.size / (1024 * 1024)).toFixed(1)} MB` : 'Dynamic',
+                    duration: formatTime(duration || video.duration || 0),
+                    source: 'Vault Storage (B2)',
+                    status: isWaiting ? 'Buffering' : isPlaying ? 'Playing' : 'Active & Secured',
+                  }}
+                  onTogglePictureInPicture={togglePictureInPicture}
+                  onTogglePrivacyMode={handleTogglePrivacy}
+                  onPanicLock={handleLockApp}
+                />
+              </div>
             </div>
           </div>
         </div>

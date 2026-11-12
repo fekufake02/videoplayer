@@ -2,50 +2,65 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
-import { Shield, Lock, EyeOff, Plus, Settings as SettingsIcon, LogOut, Search } from 'lucide-react';
+import {
+  Menu,
+  Lock,
+  EyeOff,
+  Plus,
+  Settings as SettingsIcon,
+  LogOut,
+  Search,
+  BookOpen,
+} from 'lucide-react';
 
 interface NavbarProps {
   onOpenUpload?: () => void;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
+  onToggleMobileMenu?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenUpload,
   searchQuery,
   onSearchChange,
+  onToggleMobileMenu,
 }) => {
-  const { isPrivacyActive, togglePrivacyMode, lockApp, logout } = useAuth();
+  const { isPrivacyActive, togglePrivacyMode, lockApp, logout, decoyConfig, enterDecoyMode } = useAuth();
   const { openUploadModal } = useUpload();
-  const router = useRouter();
-
   const handleUploadClick = onOpenUpload || openUploadModal;
 
-  // Auto-hide navbar on scroll down to allow full view of video, reveal on scroll up
   const [isVisible, setIsVisible] = useState(true);
   const lastScrollY = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Global Cmd+K / Ctrl+K keyboard shortcut to focus search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      
-      // Always show at the very top of the page
       if (currentScrollY < 15) {
         setIsVisible(true);
         lastScrollY.current = currentScrollY;
         return;
       }
-
-      // Hide when scrolling down, show when scrolling up
-      if (currentScrollY > lastScrollY.current && currentScrollY > 60) {
+      if (currentScrollY > lastScrollY.current && currentScrollY > 70) {
         setIsVisible(false);
       } else if (currentScrollY < lastScrollY.current) {
         setIsVisible(true);
       }
-
       lastScrollY.current = currentScrollY;
     };
 
@@ -56,104 +71,115 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header
       id="main-navbar"
-      className={`sticky top-0 z-40 glass-nav px-4 lg:px-8 py-3.5 flex items-center justify-between gap-4 transition-transform duration-300 ease-in-out ${
+      className={`sticky top-0 z-40 bg-[#0E1017]/90 backdrop-blur-md border-b border-white/[0.07] px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4 transition-transform duration-200 ease-out select-none ${
         isVisible ? 'translate-y-0' : '-translate-y-full shadow-none'
       }`}
     >
-      {/* My Vault Brand Logo & Navigation */}
-      <div className="flex items-center gap-4 sm:gap-6 shrink-0">
+      {/* Left: Mobile Menu + Vault Emblem */}
+      <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/[0.05] lg:hidden transition-colors cursor-pointer"
+            title="Open menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl bg-amber-400 text-black font-extrabold flex items-center justify-center shadow-lg shadow-amber-400/20 group-hover:scale-105 transition-all text-base tracking-tighter">
+          <div className="w-8 h-8 rounded-lg bg-indigo-500 text-white font-extrabold flex items-center justify-center text-sm shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform tracking-tight">
             V
           </div>
-          <span className="font-extrabold text-xl text-white tracking-tight hidden sm:inline">
+          <span className="font-extrabold text-base text-white tracking-tight hidden sm:inline">
             My Vault
           </span>
         </Link>
-        <nav className="flex items-center gap-1 sm:gap-2">
-          <Link
-            href="/"
-            className="px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/60 transition-all"
-          >
-            Vault
-          </Link>
-          <Link
-            href="/drive"
-            className="px-2.5 py-1 text-xs font-semibold rounded-lg text-slate-300 hover:text-amber-400 hover:bg-slate-800/60 transition-all flex items-center gap-1.5"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-            <span>Drive</span>
-          </Link>
-        </nav>
       </div>
 
-      {/* Optional Search Bar */}
+      {/* Center: Search Bar with Cmd+K hint */}
       {onSearchChange !== undefined && (
         <div className="flex-1 max-w-md relative hidden md:block">
-          <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+          <Search className="w-3.5 h-3.5 absolute left-3.5 top-3 text-slate-500" />
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Search videos by title, tags, or notes..."
             value={searchQuery || ''}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-10 pr-4 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-full pl-9 pr-14 py-1.5 bg-[#131620] border border-white/[0.07] rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60 transition-colors"
           />
+          <div className="absolute right-2.5 top-2 pointer-events-none">
+            <kbd className="px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-white/[0.05] border border-white/[0.08] rounded">
+              ⌘K
+            </kbd>
+          </div>
         </div>
       )}
 
-      {/* Header Controls */}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+      {/* Right Controls */}
+      <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={handleUploadClick}
-          className="flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-amber-400/20 active:scale-95"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500 hover:bg-indigo-400 active:scale-95 text-white text-xs font-semibold rounded-lg transition-all shadow-sm shadow-indigo-500/20 cursor-pointer"
         >
-          <Plus className="w-4 h-4" />
-          <span>Upload</span>
+          <Plus className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Upload</span>
         </button>
 
         {/* Privacy Toggle */}
         <button
           onClick={togglePrivacyMode}
           title="Toggle Privacy Mode (Shortcut: P)"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
             isPrivacyActive
-              ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
-              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+              ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+              : 'bg-[#131620] border-white/[0.07] text-slate-300 hover:bg-[#191D29]'
           }`}
         >
           <EyeOff className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Privacy</span>
         </button>
 
-        {/* Emergency Lock */}
+        {/* Panic Lock */}
         <button
           onClick={lockApp}
           title="Emergency Lock (Shortcut: Ctrl+Shift+L)"
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-medium transition-all"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] text-amber-400 rounded-lg text-xs font-medium transition-colors cursor-pointer"
         >
-          <Lock className="w-3.5 h-3.5 text-amber-400" />
+          <Lock className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Lock</span>
         </button>
+
+        {/* Quick Decoy Mode */}
+        {decoyConfig?.enabled && (
+          <button
+            onClick={enterDecoyMode}
+            title={`Decoy Screen (${decoyConfig.shortcut || 'Alt+D'})`}
+            className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] text-indigo-400 rounded-lg transition-colors cursor-pointer"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+          </button>
+        )}
 
         {/* Settings */}
         <Link
           href="/settings"
-          className="p-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center justify-center"
-          title="Settings"
+          className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] text-slate-300 rounded-lg transition-colors"
+          title="Settings & Preferences"
         >
-          <SettingsIcon className="w-4 h-4" />
+          <SettingsIcon className="w-3.5 h-3.5" />
         </Link>
 
         {/* Logout */}
         <button
           onClick={logout}
-          title="Logout"
-          className="p-2 bg-slate-900 border border-slate-800 hover:bg-rose-950/40 hover:border-rose-900/50 text-slate-400 hover:text-rose-400 rounded-xl transition-all flex items-center justify-center"
+          title="Sign Out"
+          className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-rose-950/30 hover:border-rose-800/40 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOut className="w-3.5 h-3.5" />
         </button>
       </div>
     </header>
   );
 };
-

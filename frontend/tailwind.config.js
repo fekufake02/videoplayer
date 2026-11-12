@@ -9,19 +9,33 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: '#000000',
-        surface: '#09090b',
-        'surface-hover': '#18181b',
-        border: '#27272a',
+        background: 'var(--background)',
+        'background-secondary': 'var(--background-secondary)',
+        surface: 'var(--surface)',
+        'surface-elevated': 'var(--surface-elevated)',
+        'surface-hover': 'var(--surface-hover)',
+        border: 'var(--border)',
+        'border-hover': 'var(--border-hover)',
+        'text-primary': 'var(--text-primary)',
+        'text-secondary': 'var(--text-secondary)',
+        'text-muted': 'var(--text-muted)',
         accent: {
-          DEFAULT: '#facc15', // Luminous Light Yellow
-          hover: '#eab308',
-          light: '#fef08a',
-          pink: '#f472b6',  // Soft Light Pink
+          DEFAULT: 'var(--accent)',
+          hover: 'var(--accent-hover)',
+          subtle: 'var(--accent-subtle)',
         },
+        success: 'var(--success)',
+        warning: 'var(--warning)',
+        danger: 'var(--danger)',
+      },
+      borderRadius: {
+        control: '8px',
+        card: '12px',
+        modal: '16px',
+        drawer: '18px',
       },
       fontFamily: {
-        sans: ['var(--font-outfit)', 'Inter', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
       },
     },
   },

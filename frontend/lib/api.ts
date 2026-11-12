@@ -547,6 +547,24 @@ class ApiClient {
     });
   }
 
+  async completeDriveThumbnailUpload(payload: {
+    driveFileId?: string;
+    id?: string;
+    storageKey: string;
+    blurhash?: string;
+    storageAccount?: string;
+  }): Promise<{ success: boolean; video: IDriveVideo; thumbnailUrl: string }> {
+    const targetId = payload.id || payload.driveFileId;
+    return this.request(`/drive/videos/${targetId}/thumbnail`, {
+      method: 'POST',
+      body: JSON.stringify({
+        thumbnailKey: payload.storageKey,
+        blurhash: payload.blurhash,
+        storageAccount: payload.storageAccount,
+      }),
+    });
+  }
+
   async getDriveStreamUrl(id: string): Promise<{
     success: boolean;
     driveFileId: string;

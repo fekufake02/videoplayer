@@ -7,12 +7,14 @@ import { api } from '../../lib/api';
 import { IDriveVideo } from '../../types';
 import { Navbar } from '../../components/Navbar';
 import { DriveVideoCard } from '../../components/DriveVideoCard';
+import { LibrarySidebar, LibraryNavSection } from '../../components/LibrarySidebar';
 import {
   RefreshCw,
   Search,
-  Filter,
+  ArrowUpDown,
   AlertCircle,
-  Film,
+  Cloud,
+  Check,
 } from 'lucide-react';
 
 export default function DriveGalleryPage() {
@@ -25,9 +27,10 @@ export default function DriveGalleryPage() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [toastMsg, setToastMsg] = useState<string>('');
 
-  // Filters & Search
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<string>('recentlyAdded');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -40,14 +43,13 @@ export default function DriveGalleryPage() {
     setErrorMsg('');
     try {
       const res = await api.listDriveVideos({
-        limit: 500, // Fetch all drive videos
+        limit: 500,
         search: searchQuery,
         sort: sortBy,
       });
 
       if (res?.success) {
         setVideos(res.videos || []);
-        // If empty on first load, auto-sync once
         if (!res.videos || res.videos.length === 0) {
           api.syncDriveFolder()
             .then((syncRes) => {
@@ -72,7 +74,6 @@ export default function DriveGalleryPage() {
     }
   }, [isAuthenticated, fetchDriveVideos]);
 
-  // Auto-sync whenever user returns to the tab (e.g. after uploading new videos in Google Drive)
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && isAuthenticated) {
@@ -103,130 +104,136 @@ export default function DriveGalleryPage() {
 
   if (isLoading || !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[#090d16] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#090A0F] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#090d16] text-slate-100">
-      <Navbar />
+    <div className="min-h-screen flex flex-col bg-[#090A0F] text-[#F4F5F8]">
+      <Navbar
+        searchQuery={searchQuery}
+        onSearchChange={(q) => setSearchQuery(q)}
+        onToggleMobileMenu={() => setIsMobileDrawerOpen(true)}
+      />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
-        {/* Toast Alert */}
-        {toastMsg && (
-          <div className="fixed bottom-6 right-6 z-50 p-4 bg-slate-900 border border-emerald-500/50 text-emerald-300 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-semibold animate-bounce">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span>{toastMsg}</span>
-          </div>
-        )}
+      {/* Toast Alert */}
+      {toastMsg && (
+        <div className="fixed bottom-6 right-6 z-50 p-3.5 bg-[#191D29] border border-emerald-500/40 text-emerald-300 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold animate-fade-in">
+          <Check className="w-4 h-4 text-emerald-400" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
 
-        {/* Clean Header: Heading on Top, No Description, No Change URL Button */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800/80 pb-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-              <span>Drive Videos</span>
-              {!loading && (
-                <span className="text-xs font-normal text-slate-400 font-mono px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                  {videos.length} videos
+      <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
+        {/* Sidebar */}
+        <LibrarySidebar
+          activeSection="drive"
+          onSelectSection={(sec) => {
+            if (sec !== 'drive') {
+              router.push('/');
+            }
+          }}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+          isMobileDrawerOpen={isMobileDrawerOpen}
+          onCloseMobileDrawer={() => setIsMobileDrawerOpen(false)}
+        />
+
+        {/* Main Content Area */}
+        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 space-y-6">
+          {/* Top Header & Actions Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.07]">
+            <div>
+              <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                <Cloud className="w-5 h-5 text-indigo-400" />
+                <span>Google Drive Media</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-md bg-[#131620] border border-white/[0.07] text-slate-400 font-mono tabular-nums">
+                  {videos.length}
                 </span>
-              )}
-            </h1>
-          </div>
+              </h1>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleSyncFolder}
-              disabled={isSyncing}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 hover:bg-slate-850 text-xs font-semibold text-slate-200 transition-all cursor-pointer shadow-sm disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-amber-400' : 'text-slate-400'}`} />
-              <span>{isSyncing ? 'Syncing...' : 'Sync Drive'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Search & Sort Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search drive videos..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-400/60 transition-colors"
-            />
-          </div>
-
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-slate-900/80 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400/60 cursor-pointer"
-            >
-              <option value="recentlyAdded">Recently Added</option>
-              <option value="title">Title (A - Z)</option>
-              <option value="duration">Longest First</option>
-              <option value="oldest">Oldest First</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Error Alert */}
-        {errorMsg && (
-          <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs flex items-center gap-3">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        {/* Video Grid */}
-        {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div
-                key={i}
-                className="bg-slate-900/50 border border-slate-800/80 rounded-2xl overflow-hidden animate-pulse flex flex-col"
+            <div className="flex items-center gap-2">
+              {/* Sync Button */}
+              <button
+                onClick={handleSyncFolder}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#131620] hover:bg-[#191D29] border border-white/[0.07] text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
               >
-                <div className="aspect-video w-full bg-slate-850" />
-                <div className="p-3.5 space-y-2">
-                  <div className="h-4 bg-slate-800 rounded w-4/5" />
-                  <div className="h-3 bg-slate-800/60 rounded w-1/3" />
-                </div>
+                <RefreshCw className={`w-3.5 h-3.5 text-indigo-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync Folder'}</span>
+              </button>
+
+              {/* Sort Dropdown */}
+              <div className="flex items-center gap-1.5 bg-[#131620] border border-white/[0.07] rounded-lg px-2.5 py-1.5 text-xs text-slate-300">
+                <ArrowUpDown className="w-3.5 h-3.5 text-indigo-400" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="bg-transparent text-slate-200 outline-none cursor-pointer pr-1"
+                >
+                  <option value="recentlyAdded" className="bg-[#131620] text-slate-200">Recently Added</option>
+                  <option value="nameAsc" className="bg-[#131620] text-slate-200">Name A-Z</option>
+                  <option value="nameDesc" className="bg-[#131620] text-slate-200">Name Z-A</option>
+                  <option value="duration" className="bg-[#131620] text-slate-200">Longest Duration</option>
+                  <option value="size" className="bg-[#131620] text-slate-200">File Size</option>
+                </select>
               </div>
-            ))}
+            </div>
           </div>
-        ) : videos.length === 0 ? (
-          <div className="py-16 text-center flex flex-col items-center justify-center bg-slate-900/30 border border-slate-800/60 rounded-3xl p-8">
-            <Film className="w-12 h-12 text-slate-600 mb-3" />
-            <h3 className="text-base font-bold text-white mb-1">No Drive Videos Found</h3>
-            <p className="text-xs text-slate-400 max-w-sm mb-4">
-              {searchQuery
-                ? `No videos match "${searchQuery}". Try a different keyword.`
-                : 'No videos found in your configured Google Drive folder.'}
-            </p>
-            <button
-              onClick={handleSyncFolder}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-black font-semibold text-xs rounded-xl transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Sync Now</span>
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-            {videos.map((video) => (
-              <DriveVideoCard
-                key={video._id}
-                video={video}
-              />
-            ))}
-          </div>
-        )}
-      </main>
+
+          {/* Error Message */}
+          {errorMsg && (
+            <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs flex items-center gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Videos Grid */}
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 animate-pulse">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="aspect-video bg-[#131620] rounded-xl border border-white/[0.05]" />
+              ))}
+            </div>
+          ) : videos.length === 0 ? (
+            <div className="bg-[#131620] border border-white/[0.07] rounded-2xl p-12 text-center flex flex-col items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center mb-3 text-slate-500">
+                <Cloud className="w-6 h-6 text-indigo-400" />
+              </div>
+              <h3 className="text-sm font-semibold text-white mb-1">No Drive videos found</h3>
+              <p className="text-slate-400 text-xs max-w-sm mb-4">
+                Click sync above or ensure your connected Google Drive folder contains supported media files.
+              </p>
+              <button
+                onClick={handleSyncFolder}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>Sync Now</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+              {videos.map((video) => (
+                <DriveVideoCard
+                  key={video._id}
+                  video={video}
+                  onFavoriteToggle={(id, isFav) => {
+                    setVideos((prev) =>
+                      prev.map((v) => (v._id === id ? { ...v, favorite: isFav } : v))
+                    );
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

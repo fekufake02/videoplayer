@@ -1,0 +1,1360 @@
+# Complete UI/UX Redesign — Private Video Player
+
+## Project Objective
+
+Perform a comprehensive UI/UX redesign of my existing Private Video Player application.
+
+The goal is to transform the current application into a premium, modern, minimal, responsive, privacy-focused media player and personal video vault.
+
+The experience should combine:
+
+- The polished playback experience of premium media players.
+- The clean organization of modern media libraries.
+- The privacy-first design of a secure digital vault.
+- The responsiveness and usability of a high-quality mobile application.
+
+This is not a request to build a new application from scratch. Work with the existing repository, architecture, components, APIs, authentication system, streaming infrastructure, and storage integrations.
+
+The redesign must cover the complete application, including:
+
+1. Video watch page.
+2. Video player and playback controls.
+3. Playback settings and menus.
+4. Video library and dashboard.
+5. Video cards.
+6. Google Drive library.
+7. Google Drive video watch page.
+8. Intelligent Google Drive player selection and fallback.
+9. Mobile and tablet responsiveness.
+10. Privacy-related UI/UX.
+11. Loading, buffering, error and empty states.
+12. Navigation and overall application consistency.
+
+---
+
+# 1. IMPORTANT: EXISTING ARCHITECTURE AND CONSTRAINTS
+
+Before making changes, inspect the entire project.
+
+Understand the existing:
+
+- Frontend framework and component structure.
+- Backend APIs.
+- Authentication and authorization.
+- Video player implementation.
+- B2 video streaming.
+- Google Drive integration.
+- Google Drive native streaming implementation.
+- Google Drive embedded playback.
+- Thumbnail generation and caching.
+- Playback progress storage.
+- Video metadata and database models.
+- Existing privacy mode and lock functionality.
+
+Important architectural constraints:
+
+### Video storage
+
+The application uses Backblaze B2 and Google Drive.
+
+Do not introduce adaptive bitrate streaming, HLS transcoding, DASH, multiple video resolutions, or duplicate video encodings.
+
+Storage is limited, especially with the free B2 storage allocation.
+
+Always use the original uploaded video as the primary source.
+
+Improve playback through:
+- Efficient HTTP range requests.
+- Buffer management.
+- Intelligent seeking.
+- Browser caching where appropriate.
+- Efficient thumbnail loading.
+- Playback error recovery.
+- Stream URL refresh.
+- Smooth frontend transitions.
+
+Do not increase storage consumption unnecessarily.
+
+### Google Drive
+
+Preserve the existing two playback mechanisms:
+
+1. Native Google Drive range/chunk streaming.
+2. Google Drive embedded preview.
+
+Improve the intelligence, reliability, presentation and switching behavior of these two mechanisms.
+
+Do not break Google OAuth, token refresh, Drive permissions, file access or existing streaming APIs.
+
+### Existing functionality
+
+Do not remove existing features simply because the UI is being redesigned.
+
+Preserve:
+- Authentication.
+- Application lock.
+- Privacy overlay.
+- Panic shortcuts.
+- Watch history.
+- Resume playback.
+- Favorites.
+- Tags and notes.
+- Video uploads.
+- Thumbnail management.
+- B2 integration.
+- Google Drive integration.
+- Existing keyboard shortcuts.
+- Picture-in-picture.
+- Zoom and pan.
+- Double-tap seeking.
+- Playback speed.
+- Fullscreen.
+- Existing video metadata.
+
+Where functionality already exists, improve its UX instead of implementing a duplicate.
+
+---
+
+# 2. DESIGN LANGUAGE AND VISUAL DIRECTION
+
+Create a consistent premium visual identity.
+
+## Overall aesthetic
+
+Use a modern, minimal, cinematic, dark-first design.
+
+Visual references:
+- Premium desktop media players.
+- Modern macOS applications.
+- High-quality streaming platforms.
+- Minimal productivity dashboards.
+- Secure digital vault applications.
+
+The interface should feel elegant and professional rather than flashy.
+
+### Color palette
+
+Use a restrained dark palette:
+
+- Main background: deep charcoal or near-black.
+- Secondary background: slightly lighter charcoal.
+- Card background: subtle dark grey.
+- Borders: low-contrast neutral grey.
+- Primary text: off-white.
+- Secondary text: muted grey.
+- Accent: a consistent subtle blue, violet or indigo.
+- Success: muted green.
+- Warning: amber.
+- Error: restrained red.
+
+Avoid excessive gradients, bright neon colors, glowing borders and unnecessary visual effects.
+
+### Design principles
+
+1. Consistent spacing throughout the application.
+2. Clear visual hierarchy.
+3. Rounded corners, but avoid excessive rounding.
+4. Subtle shadows and borders.
+5. Consistent icon sizes.
+6. Smooth hover and focus states.
+7. Consistent typography.
+8. Minimal visual clutter.
+9. Proper whitespace.
+10. Accessible contrast and keyboard navigation.
+
+Use Lucide icons or the project's existing icon library.
+
+Do not use emoji as interface icons.
+
+Create reusable design tokens for:
+- Colors.
+- Typography.
+- Spacing.
+- Border radius.
+- Shadows.
+- Transitions.
+- Z-index layers.
+
+The design must work in both dark and light modes if the application already supports both.
+
+---
+
+# 3. COMPLETE VIDEO WATCH PAGE REDESIGN
+
+This is the most important part of the redesign.
+
+The watch page should be cinematic, distraction-free and intuitive.
+
+## A. Desktop layout
+
+Create a responsive two-column layout where appropriate.
+
+### Header
+
+The header should contain:
+
+Left:
+- Back button.
+- Application logo.
+- Video source indicator.
+
+Center:
+- Optional breadcrumb or video collection name.
+
+Right:
+- Privacy status indicator.
+- Favorite action.
+- More options.
+- Application lock action.
+
+Keep the header compact.
+
+Avoid displaying too many controls.
+
+The header should not unnecessarily consume vertical space.
+
+### Main video area
+
+The video player should occupy the main content area.
+
+Use a large cinematic player with a 16:9 aspect ratio by default.
+
+Requirements:
+- Responsive width.
+- Proper maximum width on large monitors.
+- Centered video.
+- Black or near-black background.
+- No unwanted stretching.
+- Maintain original aspect ratio.
+- Smooth fullscreen transitions.
+- Proper loading and buffering overlays.
+
+The video should never become distorted when resizing the browser.
+
+### Player header overlay
+
+On hover or interaction, show a subtle overlay containing:
+
+- Video title.
+- Source information.
+- Optional collection name.
+- Privacy indicator.
+
+Automatically hide overlays after a short period of inactivity.
+
+### Player bottom control bar
+
+Redesign the control bar with a clean hierarchy.
+
+#### Primary controls
+
+Always prioritize:
+
+1. Play/pause.
+2. Seek backward.
+3. Seek forward.
+4. Timeline.
+5. Volume.
+6. Fullscreen.
+
+Use recognizable icons and appropriate tooltips.
+
+#### Timeline
+
+Make the timeline a major focus.
+
+Requirements:
+
+- Smooth seeking.
+- Hover timestamp preview.
+- Thumbnail preview on hover and dragging.
+- Current position.
+- Total duration.
+- Buffered progress.
+- Playback progress.
+- Bookmark markers.
+- Chapter markers if available.
+
+Use a thin default progress bar that becomes slightly larger when hovered or focused.
+
+Make the seekable area sufficiently large for touch interaction.
+
+#### Secondary controls
+
+Place secondary functionality in a settings menu rather than crowding the control bar.
+
+Include:
+
+- Playback speed.
+- Aspect ratio.
+- Subtitle settings.
+- Audio equalizer.
+- Sleep timer.
+- Frame stepping.
+- Video information.
+- Screenshot capture where supported.
+- Loop controls.
+
+#### Privacy controls
+
+Privacy actions should be accessible without cluttering the regular player.
+
+Provide:
+
+- Privacy mode.
+- Instant lock.
+- Hide player controls.
+- Panic action.
+
+Make the instant-lock action easy to reach.
+
+Never imply that a browser overlay prevents OS-level screenshots or screen recording.
+
+## B. Video information below the player
+
+Below the video, create a clean information section.
+
+Display:
+
+- Video title.
+- Duration.
+- Resolution.
+- Format.
+- File size.
+- Original source.
+- Upload date where applicable.
+- Last watched information.
+
+Keep metadata compact.
+
+Add action buttons:
+
+- Favorite.
+- Add to collection.
+- Bookmark.
+- Share internally where supported.
+- More options.
+
+Do not expose signed storage URLs, OAuth tokens or sensitive internal identifiers.
+
+## C. Up Next section
+
+Below the information section, introduce an Up Next area.
+
+Features:
+
+- Next video in the current collection.
+- Previous video.
+- Continue Watching.
+- Related videos.
+- Auto-play next toggle.
+
+For playlists, show a queue panel with:
+- Thumbnail.
+- Title.
+- Duration.
+- Current playback status.
+
+The queue should be collapsible.
+
+On mobile, move it below the video information.
+
+---
+
+# 4. PLAYBACK SETTINGS MENU REDESIGN
+
+Replace oversized or cluttered settings popups with a categorized, modern settings panel.
+
+Use a compact popover on desktop and a bottom sheet on mobile.
+
+## Settings categories
+
+### Playback
+
+- Playback speed.
+- Skip interval.
+- Auto-play next.
+- Loop current video.
+- Remember playback speed.
+- Remember volume.
+
+Playback speed options:
+
+0.25x, 0.5x, 0.75x, 1x, 1.25x, 1.5x, 1.75x, 2x, 2.5x and 3x, subject to browser support.
+
+### Display
+
+- Original aspect ratio.
+- Fit.
+- Fill.
+- 16:9.
+- 4:3.
+- Zoom.
+- Picture-in-picture.
+- Fullscreen.
+
+Never distort the original video.
+
+### Audio
+
+- Volume.
+- Audio equalizer.
+- Bass boost.
+- Vocal clarity.
+- Treble boost.
+- Normal preset.
+
+Keep equalizer optional and gracefully handle browser limitations.
+
+### Subtitles
+
+- Subtitle on/off.
+- Select subtitle track.
+- Upload subtitle file.
+- Subtitle size.
+- Subtitle color.
+- Background opacity.
+- Position.
+- Subtitle synchronization delay.
+
+Support SRT and WebVTT where implemented.
+
+### Timer
+
+- 15 minutes.
+- 30 minutes.
+- 45 minutes.
+- 60 minutes.
+- End of video.
+- Custom duration.
+
+### Privacy
+
+- Hide metadata.
+- Hide thumbnail.
+- Privacy mode.
+- Lock application.
+- Hide controls.
+- Panic shortcut configuration.
+
+### Information
+
+Display:
+- Filename.
+- Video format.
+- Resolution.
+- Frame rate where available.
+- File size.
+- Duration.
+- Playback source.
+- Streaming status.
+
+Do not perform unnecessary network requests just to populate information already available in metadata.
+
+## Settings UX
+
+- Show current selection.
+- Use clear active states.
+- Add tooltips where appropriate.
+- Remember user preferences.
+- Avoid resetting settings when switching videos.
+- Persist settings using the existing preference infrastructure.
+- Make the settings panel scrollable on mobile.
+- Close menus when clicking outside or pressing Escape.
+
+---
+
+# 5. VIDEO LIBRARY REDESIGN
+
+Redesign the main dashboard into a premium personal media library.
+
+## A. Sidebar navigation
+
+Create a responsive sidebar.
+
+Suggested navigation:
+
+MAIN:
+- Home.
+- Continue Watching.
+- Recently Added.
+- Recently Watched.
+- Unwatched.
+- Favorites.
+
+LIBRARY:
+- All Videos.
+- My Collections.
+- Playlists.
+
+SOURCES:
+- Local/B2 Library.
+- Google Drive.
+
+SETTINGS:
+- Privacy Center.
+- Storage.
+- Settings.
+
+The sidebar should:
+- Support collapsed desktop mode.
+- Show icons and labels.
+- Clearly identify the selected section.
+- Become a drawer on mobile.
+- Remember its collapsed state.
+- Avoid occupying too much horizontal space.
+
+## B. Home dashboard
+
+The dashboard should contain the following sections.
+
+### Continue Watching
+
+A prominent horizontal section.
+
+Each item should show:
+- Thumbnail.
+- Title.
+- Duration.
+- Progress bar.
+- Last watched time.
+- Resume action.
+
+### Recently Added
+
+Show recently uploaded videos.
+
+### Recently Watched
+
+Display watch history in reverse chronological order.
+
+### Favorites
+
+Show starred videos.
+
+### My Collections
+
+Show custom playlists and collections.
+
+### Google Drive
+
+Show the Drive library as a distinct source.
+
+### Unwatched
+
+Display videos with no meaningful playback history.
+
+Each section should have:
+- A clear heading.
+- Optional description.
+- View all action.
+- Responsive horizontal scrolling where appropriate.
+
+Do not display empty sections unnecessarily.
+
+## C. Library toolbar
+
+Add a consistent toolbar containing:
+
+- Search.
+- Sort.
+- Filter.
+- Grid/list toggle.
+- View options.
+- Multi-select mode.
+
+### Search
+
+Support:
+- Video title.
+- Filename.
+- Tags.
+- Notes.
+- Collection name.
+
+### Filters
+
+Include:
+- Source.
+- Duration.
+- File format.
+- Upload date.
+- Watched/unwatched.
+- Favorites.
+- Collections.
+
+### Sorting
+
+- Recently added.
+- Recently watched.
+- Alphabetical.
+- Duration.
+- File size.
+- Recently modified.
+
+Make filters usable on smaller screens through a filter drawer or bottom sheet.
+
+---
+
+# 6. VIDEO CARD REDESIGN
+
+Redesign both normal video cards and Google Drive video cards.
+
+They should share a common visual design system.
+
+## Card layout
+
+### Thumbnail
+
+- Maintain consistent aspect ratio.
+- Rounded corners.
+- High-quality image rendering.
+- Lazy loading.
+- Skeleton loading state.
+- Subtle hover scale.
+- No excessive animations.
+
+### Overlay elements
+
+Display:
+- Duration badge.
+- Source indicator.
+- Watched indicator.
+- Favorite action.
+- Optional resolution badge.
+
+### Playback progress
+
+Show a thin progress bar at the bottom of the thumbnail.
+
+Progress states:
+- Not started.
+- Partially watched.
+- Completed.
+
+### Card content
+
+Below the thumbnail:
+
+- Video title.
+- Last watched or upload date.
+- File size.
+- Format where useful.
+
+Truncate long titles elegantly.
+
+### Hover actions
+
+Show:
+- Play/resume.
+- Add to favorites.
+- Add to collection.
+- More actions.
+
+Support touch devices where hover does not exist.
+
+### More actions menu
+
+Include:
+- Play.
+- Resume.
+- Restart.
+- Add to collection.
+- Favorite/unfavorite.
+- Edit metadata.
+- Manage thumbnail.
+- Hide from library.
+- Delete where permitted.
+
+### Multi-selection
+
+Allow selecting multiple videos.
+
+Display a contextual action toolbar:
+
+- Add to collection.
+- Add tags.
+- Favorite.
+- Hide.
+- Delete where permitted.
+
+Ensure bulk operations are confirmed appropriately.
+
+---
+
+# 7. GOOGLE DRIVE LIBRARY UX
+
+Google Drive should feel like a first-class source within the application, not an external feature.
+
+## Drive navigation
+
+Implement a clean Drive browser.
+
+Features:
+- Folder navigation.
+- Breadcrumbs.
+- Folder cards.
+- Video grid.
+- Search.
+- Sorting.
+- Filtering.
+- Recently modified.
+- Favorites.
+- Recently watched.
+
+Display an unobtrusive Google Drive source badge.
+
+## Drive video cards
+
+Use the same design as normal video cards.
+
+Additionally show:
+- Google Drive indicator.
+- File availability.
+- Original filename.
+- File size.
+- Last modified date.
+- Playback progress.
+
+Do not expose raw file IDs in the regular interface.
+
+## Drive details panel
+
+Provide a dedicated details drawer.
+
+Display:
+- File name.
+- MIME type.
+- File size.
+- Modified date.
+- Folder location.
+- Thumbnail status.
+- Stream availability.
+- Last successful playback.
+
+## Drive collections
+
+Allow users to create application-level playlists and collections from Drive files.
+
+Do not duplicate or move original Drive files.
+
+Store collection relationships in the existing database.
+
+---
+
+# 8. INTELLIGENT GOOGLE DRIVE PLAYER SELECTION
+
+This is a critical part of the redesign.
+
+The application currently supports:
+
+1. Native Google Drive range/chunk streaming.
+2. Google Drive embedded preview.
+
+Retain both.
+
+Build a reliable playback selection and fallback experience.
+
+## A. Playback selection
+
+Provide three user preferences:
+
+- Automatic.
+- Prefer native player.
+- Prefer Drive embed.
+
+Default to Automatic.
+
+In Automatic mode:
+
+1. Attempt native streaming when the file is supported.
+2. Verify that the stream can actually be played.
+3. If successful, continue with the native player.
+4. If the native player fails for a recoverable compatibility reason, attempt Drive embed.
+5. Preserve playback position when switching if possible.
+6. Display a subtle notification explaining the switch.
+
+Do not switch unnecessarily.
+
+## B. Failure classification
+
+Distinguish between:
+
+- Unsupported codec.
+- Unsupported MIME type.
+- Expired authorization.
+- Missing or deleted Drive file.
+- Permission denied.
+- Network timeout.
+- Range request failure.
+- Temporary service failure.
+- Browser media decoding error.
+
+Handle each case differently.
+
+Examples:
+
+Expired authorization:
+- Refresh authorization.
+- Generate a fresh stream URL.
+- Retry at the last known playback position.
+
+Unsupported media:
+- Attempt Drive embed if available.
+
+Network interruption:
+- Retry the native stream first.
+
+Missing file:
+- Show a clear file-unavailable state.
+
+Permission failure:
+- Ask the user to reconnect or restore Drive permissions.
+
+Do not use embed fallback for authentication or permission failures without checking that the embed is independently authorized.
+
+## C. Smooth player switching
+
+Switching between native and embedded playback must not feel like opening an entirely different page.
+
+Implement:
+
+1. Capture current playback position.
+2. Capture whether the video is playing or paused.
+3. Preserve the video title and metadata.
+4. Display a lightweight transition indicator.
+5. Initialize the alternative player.
+6. Seek to the closest available position.
+7. Resume playback only if the user was previously playing and the browser permits it.
+8. Remove the old player cleanly.
+9. Prevent duplicate audio playback.
+10. Prevent multiple active video instances.
+
+Avoid flashing white or empty backgrounds during switching.
+
+Use a subtle transition with a short loading state.
+
+If position restoration is not possible, clearly inform the user rather than silently restarting.
+
+## D. Player source indicator
+
+Show a small indicator in the player information menu:
+
+- Native Drive Player.
+- Google Drive Preview.
+- Switching Player.
+- Connection issue.
+
+Do not show technical information constantly.
+
+## E. Manual switching
+
+Allow users to manually choose the player from a small menu.
+
+Changing the selection should:
+- Preserve the current timestamp when possible.
+- Preserve play/pause state.
+- Avoid page navigation.
+- Prevent playback duplication.
+
+## F. Drive playback reliability
+
+Add:
+- Automatic stream URL refresh.
+- Retry with backoff.
+- Network interruption recovery.
+- Duplicate request prevention.
+- Cleanup of old player instances.
+- Correct range handling.
+- Proper cancellation of previous requests.
+
+Do not store access tokens or sensitive signed URLs in browser logs.
+
+---
+
+# 9. SMOOTH PLAYBACK AND PERFORMANCE
+
+The redesign must not sacrifice playback performance for visual effects.
+
+Prioritize actual playback quality.
+
+## Playback improvements
+
+- Minimize unnecessary React re-renders.
+- Avoid recreating the video element unnecessarily.
+- Preserve playback state during UI updates.
+- Use efficient event listeners.
+- Throttle frequent progress updates.
+- Avoid excessive state updates from timeupdate.
+- Clean up listeners when switching videos.
+- Prevent multiple simultaneous streaming requests.
+- Handle expired URLs.
+- Retry recoverable failures.
+- Preserve playback position.
+- Avoid unnecessary metadata fetching.
+
+## Buffering UX
+
+Create a polished buffering state.
+
+When buffering:
+- Keep the player background stable.
+- Display a subtle spinner.
+- Avoid replacing the entire player with a loading page.
+- Avoid repeated flashing.
+- Show a retry option when appropriate.
+
+## Seeking UX
+
+Seeking should feel immediate.
+
+- Use HTTP range requests.
+- Show thumbnail previews.
+- Avoid unnecessary full-file downloads.
+- Handle repeated rapid seeks.
+- Cancel obsolete seek-related requests when possible.
+- Show a subtle loading indicator if the browser is actually waiting.
+
+## Transitions
+
+Use restrained animations.
+
+Examples:
+- Fade-in for menus.
+- Smooth settings transitions.
+- Thumbnail hover transitions.
+- Subtle card elevation.
+- Smooth drawer opening.
+- Player overlay fade.
+
+Avoid expensive blur filters and continuous animations.
+
+Respect the user's reduced-motion preference.
+
+---
+
+# 10. RESPONSIVE DESIGN — DESKTOP, TABLET AND MOBILE
+
+This requirement applies to every page, not just the video player.
+
+The application must work exceptionally well at:
+
+- 320px.
+- 360px.
+- 375px.
+- 390px.
+- 414px.
+- 768px.
+- 1024px.
+- 1280px.
+- 1440px.
+- 1920px and above.
+
+Do not simply scale down desktop components.
+
+Design appropriate mobile interactions.
+
+## A. Desktop
+
+- Full sidebar.
+- Multi-column video grids.
+- Wide cinematic player.
+- Settings popovers.
+- Optional details sidebar.
+- Keyboard shortcuts.
+- Hover interactions.
+- Spacious library layout.
+
+## B. Tablet
+
+- Collapsible sidebar.
+- Two or three-column video grid depending on width.
+- Responsive watch page.
+- Touch-friendly controls.
+- Settings in adaptive popovers or drawers.
+- Avoid horizontal overflow.
+
+## C. Mobile
+
+### Navigation
+
+- Use a compact top bar.
+- Use a navigation drawer or bottom navigation.
+- Avoid desktop sidebar occupying screen space.
+- Keep primary actions accessible.
+
+### Mobile video player
+
+The player must be fully usable on a small screen.
+
+Requirements:
+- Full-width player.
+- Proper 16:9 layout.
+- Support landscape orientation.
+- Large touch targets.
+- Double-tap seeking.
+- Centered play/pause.
+- Volume controls.
+- Fullscreen button.
+- Settings bottom sheet.
+- Touch-friendly timeline.
+- No overlapping controls.
+- No accidental page scrolling while interacting with the timeline.
+
+Use mobile-appropriate control placement.
+
+When fullscreen is activated:
+- Adapt controls to landscape orientation.
+- Keep the timeline accessible.
+- Hide unnecessary metadata.
+- Avoid controls overlapping system navigation areas.
+- Respect safe-area insets.
+
+### Mobile settings
+
+Use a bottom sheet instead of desktop-style floating popups.
+
+It should:
+- Be scrollable.
+- Have a clear close action.
+- Support swipe-down dismissal.
+- Avoid going beyond viewport height.
+- Remain usable with the software keyboard open.
+
+### Mobile library
+
+- Two-column grid on suitable widths.
+- Single-column list option.
+- Compact card information.
+- Touch-accessible action menus.
+- No hover-only functionality.
+- Search accessible from the header.
+- Filters in a drawer or bottom sheet.
+
+### Mobile performance
+
+- Lazy-load images.
+- Avoid rendering too many video cards.
+- Use pagination or virtualization for large libraries.
+- Reduce unnecessary animations.
+- Avoid loading all thumbnails simultaneously.
+
+---
+
+# 11. PRIVACY-FIRST UX
+
+The application must retain its secure vault identity.
+
+Improve the presentation of existing privacy controls.
+
+## Header privacy indicator
+
+Display a small, consistent privacy indicator.
+
+Possible states:
+- Protected.
+- Privacy mode active.
+- Locked.
+- Session expired.
+
+Do not expose sensitive information in notifications.
+
+## Privacy mode
+
+When privacy mode is enabled:
+- Hide sensitive video metadata.
+- Hide thumbnails.
+- Hide library previews.
+- Hide recent history.
+- Apply the configured overlay.
+- Mute and pause playback if configured.
+
+## Instant lock
+
+Provide a prominent but unobtrusive lock action.
+
+On lock:
+- Pause playback.
+- Mute audio.
+- Hide sensitive UI.
+- Clear sensitive visible metadata.
+- Enforce server-side authorization checks.
+- Prevent further protected API access until reauthentication.
+
+Do not rely on a React overlay alone as the security boundary.
+
+## Secure UI states
+
+Create consistent locked, expired-session and unauthorized-access pages.
+
+Avoid displaying stack traces, tokens, storage URLs or sensitive filenames in error messages.
+
+---
+
+# 12. EMPTY, LOADING, ERROR AND SUCCESS STATES
+
+Every page and feature must have polished states.
+
+## Loading
+
+Use skeleton placeholders for:
+- Video cards.
+- Thumbnails.
+- Library sections.
+- Video information.
+- Drive folders.
+
+Do not use full-screen spinners for small operations.
+
+## Empty states
+
+Examples:
+- No videos uploaded.
+- No favorites.
+- No watch history.
+- No collections.
+- No Drive files.
+- No search results.
+
+Provide helpful next actions.
+
+## Error states
+
+Examples:
+- Video unavailable.
+- Drive authorization expired.
+- Storage connection failed.
+- Thumbnail unavailable.
+- Network interrupted.
+- Unsupported format.
+
+Provide clear messages and appropriate recovery actions.
+
+## Success feedback
+
+Use subtle toast notifications for:
+- Favorite added.
+- Bookmark saved.
+- Added to collection.
+- Upload completed.
+- Settings saved.
+- Drive reconnected.
+
+Avoid excessive toast notifications.
+
+---
+
+# 13. ACCESSIBILITY AND INTERACTION QUALITY
+
+Implement:
+
+- Keyboard accessibility.
+- Visible focus indicators.
+- Proper ARIA labels.
+- Screen-reader-friendly buttons.
+- Accessible menus.
+- Escape-to-close behavior.
+- Adequate color contrast.
+- Touch targets of approximately 44px or larger.
+- Reduced-motion support.
+
+Ensure all player controls are accessible without a mouse.
+
+Maintain existing keyboard shortcuts and document them in a shortcuts panel.
+
+---
+
+# 14. RESPONSIVE TESTING AND QUALITY ASSURANCE
+
+Do not consider the redesign complete merely because it looks good on desktop.
+
+Test the following:
+
+### Watch page
+- Normal B2 video.
+- Google Drive native streaming.
+- Google Drive embed.
+- Player switching during playback.
+- Fullscreen.
+- Picture-in-picture.
+- Landscape mobile.
+- Portrait mobile.
+- Long video titles.
+- Buffering.
+- Network interruption.
+- Expired stream URLs.
+
+### Library
+- Empty library.
+- Large video collection.
+- Long titles.
+- Missing thumbnails.
+- Multi-selection.
+- Search and filters.
+- Mobile grid.
+- Tablet layout.
+- Sidebar collapse.
+
+### Privacy
+- Lock during playback.
+- Lock during player switching.
+- Session expiration.
+- Tab switching.
+- Browser blur.
+- Reauthentication.
+- Protected API access while locked.
+
+### Visual quality
+Check all major breakpoints.
+
+There must be:
+- No horizontal overflow.
+- No overlapping controls.
+- No clipped menus.
+- No broken grids.
+- No inaccessible buttons.
+- No unexpected layout jumps.
+
+---
+
+# 15. IMPLEMENTATION RULES
+
+These rules are mandatory.
+
+1. Inspect existing code before changing it.
+2. Reuse existing components wherever possible.
+3. Do not rewrite the backend unnecessarily.
+4. Do not change API contracts unless required.
+5. Do not break existing authentication.
+6. Do not break B2 streaming.
+7. Do not break Google Drive OAuth or streaming.
+8. Do not duplicate player implementations unnecessarily.
+9. Do not introduce adaptive streaming or duplicate video encodings.
+10. Do not add unnecessary dependencies.
+11. Do not hardcode mock data into production UI.
+12. Do not leave nonfunctional buttons.
+13. Do not remove existing functionality.
+14. Do not replace real data with static placeholders.
+15. Keep TypeScript types correct.
+16. Clean up event listeners, media instances and requests.
+17. Preserve existing database compatibility.
+18. Handle mobile browsers separately where necessary.
+19. Follow the existing styling and component conventions where reasonable.
+20. Avoid creating oversized components containing all functionality.
+
+Use reusable components and shared hooks.
+
+Separate:
+- Presentation.
+- Playback state.
+- Streaming logic.
+- Privacy behavior.
+- User preferences.
+- Data fetching.
+
+---
+
+# 16. SUGGESTED COMPONENT ORGANIZATION
+
+Adapt this structure to the actual repository rather than blindly duplicating files.
+
+components/
+  player/
+    VideoPlayer.tsx
+    PlayerControls.tsx
+    PlayerTimeline.tsx
+    PlayerSettings.tsx
+    PlayerHeader.tsx
+    PlayerInfo.tsx
+    PlayerLoading.tsx
+    PlayerError.tsx
+    BookmarkManager.tsx
+    SubtitleManager.tsx
+    PlaybackQueue.tsx
+
+  library/
+    VideoGrid.tsx
+    VideoCard.tsx
+    DriveVideoCard.tsx
+    LibraryToolbar.tsx
+    LibrarySidebar.tsx
+    LibrarySection.tsx
+    CollectionCard.tsx
+    VideoDetailsDrawer.tsx
+
+  drive/
+    DriveBrowser.tsx
+    DriveFolderCard.tsx
+    DrivePlayerSelector.tsx
+    DrivePlaybackStatus.tsx
+
+  privacy/
+    PrivacyIndicator.tsx
+    LockButton.tsx
+    PrivacySettings.tsx
+
+hooks/
+  usePlaybackProgress.ts
+  usePlaybackSettings.ts
+  usePlaybackShortcuts.ts
+  usePlaybackQueue.ts
+  useSleepTimer.ts
+  useBookmarks.ts
+  useResponsivePlayer.ts
+
+services/
+  playbackService.ts
+  b2PlaybackService.ts
+  drivePlaybackService.ts
+
+Use existing files and components if equivalent implementations already exist.
+
+---
+
+# 17. FINAL EXPECTED RESULT
+
+The final application should feel like a professionally designed, production-quality private media platform.
+
+The watch page should feel cinematic and distraction-free.
+
+The player should be intuitive and responsive.
+
+The settings menu should be organized and easy to use.
+
+The library should feel like a premium personal media collection.
+
+Google Drive should feel like a native part of the application.
+
+Switching between Drive playback mechanisms should be smooth and intelligent.
+
+Mobile users should receive an intentionally designed experience rather than a compressed desktop layout.
+
+The application should remain lightweight, storage-efficient and compatible with the existing B2 and Google Drive architecture.
+
+## Execution strategy
+
+Implement this in logical stages:
+
+1. Audit existing components and architecture.
+2. Establish the design system and reusable primitives.
+3. Redesign the desktop watch page.
+4. Redesign player controls and settings.
+5. Redesign the library and video cards.
+6. Improve Google Drive library UX.
+7. Implement intelligent Drive playback switching.
+8. Implement responsive layouts.
+9. Improve loading, buffering and error states.
+10. Implement accessibility and visual QA.
+
+After implementation, provide:
+
+- Summary of changes.
+- List of files modified.
+- New components created.
+- Existing functionality preserved.
+- New functionality implemented.
+- Known limitations.
+- Responsive testing results.
+- Any remaining issues.
+
+**Most important:** Do not stop after producing a design proposal or mockup. Implement the actual changes in the existing codebase. Work incrementally, verify builds and test the actual playback flows after each major stage.

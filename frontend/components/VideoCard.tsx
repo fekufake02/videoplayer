@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import { IVideo } from '../types';
-import { Play, Heart, MoreVertical, Clock, Download, Edit3, Trash2, Tag } from 'lucide-react';
+import { Play, Heart, MoreVertical, Download, Edit3, Trash2, Tag, Clock, HardDrive } from 'lucide-react';
 import { api } from '../lib/api';
 import { generateAndUploadThumbnail } from '../lib/thumbnailGenerator';
 import { ThumbnailLoader } from './ThumbnailLoader';
@@ -16,6 +16,9 @@ interface VideoCardProps {
   onEdit?: (video: IVideo) => void;
   onDelete?: (video: IVideo) => void;
   onFavoriteToggle?: (id: string, isFav: boolean) => void;
+  isSelected?: boolean;
+  onSelectToggle?: (id: string) => void;
+  viewMode?: 'grid' | 'list';
 }
 
 export const VideoCard: React.FC<VideoCardProps> = ({
@@ -23,6 +26,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   onEdit,
   onDelete,
   onFavoriteToggle,
+  isSelected = false,
+  onSelectToggle,
+  viewMode = 'grid',
 }) => {
   const pathname = usePathname();
   const { settings } = useAuth();
@@ -31,28 +37,18 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   const [isFavorite, setIsFavorite] = useState(video.favorite);
   const [showMenu, setShowMenu] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
-  const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(video.thumbnailUrl || null);
 
   const handleMouseEnter = async () => {
-    setIsHovered(true);
     if (shouldBlockThumbnail) return;
-    
-    // Lazy load thumbnail URL on first hover if not already loaded
     if (!thumbnailUrl && !video.thumbnailKey) {
       try {
         const res = await api.getStreamUrl(video._id);
         if (res?.streamUrl) {
-          setStreamUrl(res.streamUrl);
-          
-          // Auto-generate WebP thumbnail for existing videos without one
-          // This runs in background and doesn't block UI
           generateAndUploadThumbnail(res.streamUrl, video.originalFilename)
             .then((result) => {
               if (result?.thumbnailKey) {
                 api.attachThumbnail(video._id, result.thumbnailKey, result.blurhash).catch(() => {});
-                // Fetch presigned thumbnail URL for immediate display
                 api.getThumbnailUrl(video._id).then((t) => {
                   if (t?.thumbnailUrl) setThumbnailUrl(t.thumbnailUrl);
                 }).catch(() => {});
@@ -64,7 +60,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         console.error('Failed to get stream URL:', err);
       }
     } else if (video.thumbnailKey && !thumbnailUrl) {
-      // Get presigned thumbnail URL
       try {
         const res = await api.getThumbnailUrl(video._id);
         if (res?.thumbnailUrl) {
@@ -77,14 +72,21 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   };
 
   const formatDuration = (seconds: number) => {
-    if (!seconds || seconds <= 0) return '--:--';
+    if (!seconds || seconds <= 0) return '0:00';
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     if (hrs > 0) {
-      return `${hrs}h ${mins}m`;
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
   const calculateProgress = () => {
@@ -144,17 +146,21 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   return (
     <div
       id={`video-card-${video._id}`}
-      className="group relative glass-panel rounded-2xl overflow-hidden hover:border-indigo-500/40 transition-all duration-300 flex flex-col shadow-lg"
+      className={`group relative bg-[#131620] border rounded-xl overflow-hidden transition-all duration-200 ${
+        viewMode === 'list' ? 'flex flex-col sm:flex-row items-stretch' : 'flex flex-col'
+      } hover:bg-[#191D29] hover:border-white/[0.14] select-none ${
+        isSelected ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-white/[0.07]'
+      }`}
     >
       {/* Thumbnail Container */}
       <Link
         href={`/watch/${video._id}`}
         onClick={handleCardClick}
         onMouseEnter={handleMouseEnter}
-        onMouseLeave={() => setIsHovered(false)}
-        className="relative aspect-video bg-zinc-950 overflow-hidden flex items-center justify-center"
+        className={`relative ${
+          viewMode === 'list' ? 'w-full sm:w-56 shrink-0 aspect-video' : 'aspect-video'
+        } bg-[#090A0F] overflow-hidden flex items-center justify-center cursor-pointer`}
       >
-        {/* Optimized Thumbnail Loader with Blurhash LQIP */}
         <ThumbnailLoader
           videoId={video._id}
           src={thumbnailUrl || undefined}
@@ -162,39 +168,63 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           fallbackText={video.originalFilename}
           alt={video.title}
           blocked={shouldBlockThumbnail}
-          className="group-hover:scale-105 transition-transform duration-500"
-          onLoad={() => {
-            // Thumbnail loaded successfully
-          }}
+          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
         />
 
-        {/* Hover Dark Overlay & Center Play Button */}
-        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-          <div className="w-12 h-12 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-xl group-hover:scale-110 group-hover:bg-amber-300 transition-all">
-            <Play className="w-5 h-5 fill-current translate-x-0.5" />
+        {/* Hover Center Play Button */}
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center justify-center pointer-events-none">
+          <div className="w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center shadow-lg transform scale-95 group-hover:scale-100 transition-transform">
+            <Play className="w-4 h-4 fill-current translate-x-0.5" />
           </div>
         </div>
 
-        {/* Top Badges */}
-        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none">
-          <button
-            onClick={handleToggleFavorite}
-            className="pointer-events-auto p-1.5 rounded-full bg-slate-950/60 backdrop-blur-md text-slate-300 hover:text-rose-400 transition-colors"
-          >
-            <Heart className={`w-4 h-4 ${isFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
-          </button>
+        {/* Top Badges: Source Badge (Left) & Favorite (Right) */}
+        <div className="absolute top-2 inset-x-2 flex items-center justify-between pointer-events-none z-10">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-400/15 text-amber-300 border border-amber-400/30 backdrop-blur-md">
+            Vault
+          </span>
 
-          <span className="px-2 py-0.5 rounded-md bg-slate-950/75 backdrop-blur-md text-[11px] font-mono text-slate-300 flex items-center gap-1 border border-slate-800/80">
-            <Clock className="w-3 h-3 text-slate-400" />
+          <div className="flex items-center gap-1">
+            {onSelectToggle && (
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSelectToggle(video._id);
+                }}
+                className={`pointer-events-auto p-1.5 rounded-lg backdrop-blur-md transition-colors ${
+                  isSelected ? 'bg-indigo-500 text-white' : 'bg-black/60 text-slate-400 hover:text-white'
+                }`}
+                title="Select video"
+              >
+                <div className={`w-3.5 h-3.5 border rounded-sm flex items-center justify-center ${isSelected ? 'border-white bg-indigo-600' : 'border-white/40'}`}>
+                  {isSelected && <span className="text-[10px] font-bold text-white">✓</span>}
+                </div>
+              </button>
+            )}
+
+            <button
+              onClick={handleToggleFavorite}
+              className="pointer-events-auto p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-slate-300 hover:text-rose-400 transition-colors"
+              title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Heart className={`w-3.5 h-3.5 ${isFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Duration Badge Bottom-Right */}
+        <div className="absolute bottom-2 right-2 pointer-events-none z-10">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-slate-200 bg-black/80 backdrop-blur-md border border-white/10 tabular-nums">
             {formatDuration(video.duration)}
           </span>
         </div>
 
         {/* Bottom Playback Progress Bar */}
         {progress > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-800">
+          <div className="absolute bottom-0 inset-x-0 h-1 bg-white/10 z-10">
             <div
-              className="h-full bg-amber-400 transition-all duration-300"
+              className="h-full bg-indigo-400 transition-all duration-300"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -202,49 +232,37 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       </Link>
 
       {/* Card Content Body */}
-      <div className="p-4 flex-1 flex flex-col justify-between">
+      <div className="p-3 flex-1 flex flex-col justify-between">
         <div>
-          <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="flex items-start justify-between gap-1.5 mb-1.5">
             <Link
               href={`/watch/${video._id}`}
               onClick={handleCardClick}
-              className="font-semibold text-sm text-slate-100 line-clamp-1 hover:text-indigo-400 transition-colors"
+              className="font-medium text-xs sm:text-sm text-slate-100 line-clamp-2 hover:text-indigo-400 transition-colors leading-snug"
               title={video.title}
             >
               {video.title}
             </Link>
 
-            {/* Context Actions */}
-            <div className="flex items-center gap-1">
-              {onEdit && (
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onEdit(video);
-                  }}
-                  title="Edit title & details"
-                  className="p-1 text-zinc-400 hover:text-amber-400 rounded-lg hover:bg-zinc-800/80 transition-all"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
-              )}
+            {/* Menu Trigger */}
+            <div className="relative shrink-0">
               <button
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   setShowMenu((prev) => !prev);
                 }}
-                className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800/80 transition-all"
+                className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-white/[0.06] transition-colors"
+                title="Options"
               >
-                <MoreVertical className="w-4 h-4" />
+                <MoreVertical className="w-3.5 h-3.5" />
               </button>
 
-              {/* Menu Dropdown */}
+              {/* Context Menu Dropdown */}
               {showMenu && (
                 <div
                   onMouseLeave={() => setShowMenu(false)}
-                  className="absolute right-0 top-6 z-30 w-36 glass-panel bg-slate-900 border border-slate-800 rounded-xl py-1 shadow-2xl text-xs"
+                  className="absolute right-0 top-6 z-30 w-36 bg-[#191D29] border border-white/[0.08] rounded-xl py-1 shadow-2xl text-xs text-slate-200"
                 >
                   {onEdit && (
                     <button
@@ -253,19 +271,19 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                         setShowMenu(false);
                         onEdit(video);
                       }}
-                      className="w-full px-3 py-2 text-left hover:bg-slate-800 text-slate-200 flex items-center gap-2"
+                      className="w-full px-3 py-2 text-left hover:bg-white/[0.06] flex items-center gap-2"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      Edit Details
+                      <Edit3 className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Edit Details</span>
                     </button>
                   )}
                   <button
                     onClick={handleDownload}
                     disabled={isDownloading}
-                    className="w-full px-3 py-2 text-left hover:bg-slate-800 text-slate-200 flex items-center gap-2"
+                    className="w-full px-3 py-2 text-left hover:bg-white/[0.06] flex items-center gap-2"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    {isDownloading ? 'Preparing...' : 'Download'}
+                    <Download className="w-3.5 h-3.5 text-slate-400" />
+                    <span>{isDownloading ? 'Preparing...' : 'Download'}</span>
                   </button>
                   {onDelete && (
                     <button
@@ -274,10 +292,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                         setShowMenu(false);
                         onDelete(video);
                       }}
-                      className="w-full px-3 py-2 text-left hover:bg-rose-950/40 text-rose-400 flex items-center gap-2 border-t border-slate-800/80"
+                      className="w-full px-3 py-2 text-left hover:bg-rose-950/40 text-rose-400 flex items-center gap-2 border-t border-white/[0.06]"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Delete Video</span>
                     </button>
                   )}
                 </div>
@@ -287,11 +305,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
           {/* Tags */}
           {video.tags && video.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {video.tags.slice(0, 3).map((tag, i) => (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {video.tags.slice(0, 2).map((tag, i) => (
                 <span
                   key={i}
-                  className="px-2 py-0.5 bg-slate-900/90 border border-slate-800 rounded-md text-[10px] text-slate-400 flex items-center gap-1"
+                  className="px-1.5 py-0.5 bg-[#090A0F] border border-white/[0.06] rounded text-[10px] text-slate-400 flex items-center gap-0.5"
                 >
                   <Tag className="w-2.5 h-2.5 text-indigo-400" />
                   {tag}
@@ -301,10 +319,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           )}
         </div>
 
-        {/* Progress % & Plays Footer */}
-        <div className="flex items-center justify-between text-[11px] text-slate-400 mt-3 pt-2.5 border-t border-slate-800/50">
+        {/* Metadata Footer */}
+        <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2.5 pt-2 border-t border-white/[0.05] tabular-nums">
           <span>{progress > 0 ? `${progress}% watched` : 'Unwatched'}</span>
-          <span>{video.playCount || 0} plays</span>
+          <div className="flex items-center gap-2">
+            {video.size ? <span>{formatFileSize(video.size)}</span> : null}
+            <span>{video.playCount || 0} plays</span>
+          </div>
         </div>
       </div>
     </div>

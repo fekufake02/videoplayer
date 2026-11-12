@@ -3,7 +3,9 @@ import { Outfit } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '../context/AuthContext';
 import { UploadProvider } from '../context/UploadContext';
+import { PipProvider } from '../context/PipContext';
 import { PrivacyOverlay } from '../components/PrivacyOverlay';
+import { DecoyInterfaceWrapper } from '../components/DecoyInterfaceWrapper';
 import { UploadDock } from '../components/UploadDock';
 import { UploadModal } from '../components/UploadModal';
 
@@ -14,8 +16,12 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: 'My Vault',
-  description: 'Your elegant media vault with seamless playback control.',
+  title: 'My Vault - Media & Video Player',
+  description: 'An elegant, private video vault and streaming player with Backblaze B2 and Google Drive integration.',
+  openGraph: {
+    title: 'My Vault - Media & Video Player',
+    description: 'An elegant, private video vault and streaming player with Backblaze B2 and Google Drive integration.',
+  },
   robots: {
     index: false,
     follow: false,
@@ -29,14 +35,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`dark ${outfit.variable}`}>
-      <body className="bg-black text-zinc-100 min-h-screen flex flex-col font-sans selection:bg-indigo-600 selection:text-white antialiased">
+      <body className="bg-background text-text-primary min-h-screen flex flex-col font-sans selection:bg-accent/30 selection:text-white antialiased">
         <AuthProvider>
-          <UploadProvider>
-            <PrivacyOverlay />
-            {children}
-            <UploadDock />
-            <UploadModal />
-          </UploadProvider>
+          <PipProvider>
+            <UploadProvider>
+              <PrivacyOverlay />
+              <DecoyInterfaceWrapper />
+              {children}
+              <UploadDock />
+              <UploadModal />
+            </UploadProvider>
+          </PipProvider>
         </AuthProvider>
       </body>
     </html>

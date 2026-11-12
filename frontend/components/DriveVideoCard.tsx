@@ -3,51 +3,67 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { IDriveVideo } from '../types';
-import { Play, HardDrive } from 'lucide-react';
+import { Play, Heart, MoreVertical, ExternalLink, Download, Cloud } from 'lucide-react';
 
 interface DriveVideoCardProps {
   video: IDriveVideo;
   onPlay?: (video: IDriveVideo) => void;
+  onFavoriteToggle?: (id: string, isFav: boolean) => void;
 }
 
-export const DriveVideoCard: React.FC<DriveVideoCardProps> = ({ video, onPlay }) => {
+export const DriveVideoCard: React.FC<DriveVideoCardProps> = ({ video, onPlay, onFavoriteToggle }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(Boolean(video.favorite));
+  const [showMenu, setShowMenu] = useState(false);
 
   const formatFileSize = (bytes?: number) => {
-    if (!bytes || bytes <= 0) return 'Video';
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
     if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
   const formatDuration = (seconds?: number) => {
-    if (!seconds || seconds <= 0) return '';
-    const mins = Math.floor(seconds / 60);
+    if (!seconds || seconds <= 0) return '0:00';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const hasB2CustomThumbnail = Boolean(video.thumbnailKey);
-  const fileExt = video.originalFilename.split('.').pop()?.toUpperCase() || 'MP4';
+  const handleToggleFavorite = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const next = !isFavorite;
+    setIsFavorite(next);
+    if (onFavoriteToggle) onFavoriteToggle(video._id, next);
+  };
+
   const watchHref = `/drive/watch/${video._id}`;
 
   return (
-    <Link
-      href={watchHref}
-      onClick={() => {
-        if (onPlay) onPlay(video);
-      }}
-      className="group relative bg-slate-900/80 hover:bg-slate-900 border border-slate-800/90 hover:border-amber-400/50 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-amber-400/5 flex flex-col"
+    <div
+      id={`drive-video-card-${video._id}`}
+      className="group relative bg-[#131620] border border-white/[0.07] rounded-xl overflow-hidden transition-all duration-200 flex flex-col hover:bg-[#191D29] hover:border-white/[0.14] select-none"
     >
-      {/* 16:9 Thumbnail Area */}
-      <div className="relative aspect-video w-full bg-slate-950 overflow-hidden">
+      {/* Thumbnail Container */}
+      <Link
+        href={watchHref}
+        onClick={() => {
+          if (onPlay) onPlay(video);
+        }}
+        className="relative aspect-video bg-[#090A0F] overflow-hidden flex items-center justify-center cursor-pointer"
+      >
         {/* Fallback Graphic */}
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-black flex flex-col items-center justify-center p-4 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-amber-400/10 border border-amber-400/20 text-amber-400 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-            <Play className="w-5 h-5 fill-amber-400/80 ml-0.5" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#0E1017] via-[#131620] to-[#090A0F] flex flex-col items-center justify-center p-3 text-center">
+          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-1 group-hover:scale-105 transition-transform">
+            <Cloud className="w-5 h-5 text-indigo-400" />
           </div>
-          <span className="text-xs text-slate-500 font-medium line-clamp-1 max-w-[85%]">
+          <span className="text-[11px] text-slate-500 font-medium line-clamp-1 max-w-[85%]">
             {video.title}
           </span>
         </div>
@@ -60,62 +76,114 @@ export const DriveVideoCard: React.FC<DriveVideoCardProps> = ({ video, onPlay })
             referrerPolicy="no-referrer"
             onLoad={() => setImageLoaded(true)}
             onError={() => setImageError(true)}
-            className={`absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${
+            className={`absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03] ${
               imageLoaded ? 'opacity-100' : 'opacity-0'
             }`}
           />
         )}
 
-        {/* Top Floating Badge (only if B2 Custom thumbnail exists) */}
-        {hasB2CustomThumbnail && (
-          <div className="absolute top-2.5 left-2.5 pointer-events-none">
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold tracking-tight uppercase flex items-center gap-1 backdrop-blur-md shadow-sm bg-amber-400/95 text-black border border-amber-300">
-              <HardDrive className="w-2.5 h-2.5" />
-              <span>B2 Cover</span>
-            </span>
-          </div>
-        )}
-
-        {/* Duration Badge */}
-        {formatDuration(video.duration) && (
-          <div className="absolute bottom-2.5 right-2.5 pointer-events-none">
-            <span className="px-1.5 py-0.5 rounded bg-black/80 text-white text-[10px] font-mono tabular-nums backdrop-blur-sm">
-              {formatDuration(video.duration)}
-            </span>
-          </div>
-        )}
-
         {/* Hover Center Play Button */}
-        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <div className="w-12 h-12 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-lg shadow-amber-400/40 transform scale-90 group-hover:scale-100 transition-all">
-            <Play className="w-5 h-5 fill-black ml-0.5" />
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center justify-center pointer-events-none">
+          <div className="w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center shadow-lg transform scale-95 group-hover:scale-100 transition-transform">
+            <Play className="w-4 h-4 fill-current translate-x-0.5" />
           </div>
         </div>
-      </div>
 
-      {/* Clean Metadata Details (Zero-Pill Discipline) */}
-      <div className="p-3.5 flex-1 flex flex-col justify-between">
-        <div>
-          <h3
-            title={video.title}
-            className="text-sm font-bold text-slate-100 group-hover:text-amber-400 transition-colors line-clamp-2 leading-snug tracking-tight"
+        {/* Top Badges: Drive Source Badge (Left) & Favorite (Right) */}
+        <div className="absolute top-2 inset-x-2 flex items-center justify-between pointer-events-none z-10">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 backdrop-blur-md">
+            Drive
+          </span>
+
+          <button
+            onClick={handleToggleFavorite}
+            title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            className="pointer-events-auto p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-slate-300 hover:text-rose-400 transition-colors"
           >
-            {video.title}
-          </h3>
+            <Heart className={`w-3.5 h-3.5 ${isFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
+          </button>
+        </div>
 
-          <div className="mt-2 flex items-center gap-2 text-xs text-slate-400 font-mono tabular-nums">
-            <span>{formatFileSize(video.size)}</span>
-            <span aria-hidden="true" className="text-slate-600">·</span>
-            <span>{fileExt}</span>
-            {hasB2CustomThumbnail && (
-              <>
-                <span aria-hidden="true" className="text-slate-600">·</span>
-                <span className="text-amber-400/90 font-sans font-medium">B2 Synced</span>
-              </>
-            )}
+        {/* Duration Badge Bottom-Right */}
+        <div className="absolute bottom-2 right-2 pointer-events-none z-10">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium text-slate-200 bg-black/80 backdrop-blur-md border border-white/10 tabular-nums">
+            {formatDuration(video.duration)}
+          </span>
+        </div>
+      </Link>
+
+      {/* Card Content Body */}
+      <div className="p-3 flex-1 flex flex-col justify-between">
+        <div>
+          <div className="flex items-start justify-between gap-1.5 mb-1.5">
+            <Link
+              href={watchHref}
+              onClick={() => {
+                if (onPlay) onPlay(video);
+              }}
+              className="font-medium text-xs sm:text-sm text-slate-100 line-clamp-2 hover:text-indigo-400 transition-colors leading-snug"
+              title={video.title}
+            >
+              {video.title}
+            </Link>
+
+            {/* Context Actions */}
+            <div className="relative shrink-0">
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowMenu((prev) => !prev);
+                }}
+                className="p-1 text-slate-400 hover:text-white rounded-md hover:bg-white/[0.06] transition-colors"
+                title="Options"
+              >
+                <MoreVertical className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Menu Dropdown */}
+              {showMenu && (
+                <div
+                  onMouseLeave={() => setShowMenu(false)}
+                  className="absolute right-0 top-6 z-30 w-40 bg-[#191D29] border border-white/[0.08] rounded-xl py-1 shadow-2xl text-xs text-slate-200"
+                >
+                  <a
+                    href={video.driveViewUrl || `https://drive.google.com/file/d/${video.driveFileId}/view`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-3 py-2 text-left hover:bg-white/[0.06] flex items-center gap-2"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Open in Drive</span>
+                  </a>
+                  <a
+                    href={`/api/drive/videos/${video.driveFileId}/chunk-stream`}
+                    download={video.originalFilename || 'video.mp4'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-3 py-2 text-left hover:bg-white/[0.06] flex items-center gap-2 border-t border-white/[0.06]"
+                  >
+                    <Download className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Download Stream</span>
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Metadata Footer */}
+        <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2.5 pt-2 border-t border-white/[0.05] tabular-nums">
+          <span>Synced File</span>
+          <span>{formatFileSize(video.size)}</span>
+        </div>
       </div>
-    </Link>
+    </div>
   );
 };

@@ -28,7 +28,6 @@ export const UploadDock: React.FC = () => {
     clearCompleted,
   } = useUpload();
 
-  // If modal is open or there are no tasks at all, hide the floating dock
   if (isModalOpen || tasks.length === 0) {
     return null;
   }
@@ -55,7 +54,6 @@ export const UploadDock: React.FC = () => {
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
   const retryingCount = tasks.filter((t) => t.status === 'retrying').length;
 
-  // Compute maximum ETA among active tasks
   const maxEta = Math.max(
     0,
     ...tasks.filter((t) => t.status === 'uploading').map((t) => t.etaSeconds || 0)
@@ -63,31 +61,30 @@ export const UploadDock: React.FC = () => {
 
   const speedText = formatSpeed(overallSpeed);
   const etaText = formatEta(maxEta);
-
   const allCompleted = completedCount === tasks.length;
 
   return (
     <div
       id="upload-dock-container"
-      className="fixed bottom-5 right-5 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300"
+      className="fixed bottom-5 right-5 z-40 animate-in fade-in slide-in-from-bottom-4 duration-200"
     >
-      <div className="flex items-center gap-3 px-4 py-3 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 rounded-2xl shadow-2xl text-white max-w-md">
+      <div className="flex items-center gap-3 px-3.5 py-2.5 bg-surface-elevated/95 backdrop-blur-md border border-border rounded-xl shadow-2xl text-text-primary max-w-md">
         {/* Status Icon */}
         <div className="relative shrink-0">
           {allCompleted ? (
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <CheckCircle2 className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-success/15 border border-success/30 flex items-center justify-center text-success">
+              <CheckCircle2 className="w-4 h-4" />
             </div>
           ) : errorCount > 0 && uploadingCount === 0 ? (
-            <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400">
-              <AlertTriangle className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-danger/15 border border-danger/30 flex items-center justify-center text-danger">
+              <AlertTriangle className="w-4 h-4" />
             </div>
           ) : (
-            <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+            <div className="w-8 h-8 rounded-lg bg-accent/15 border border-accent/30 flex items-center justify-center text-accent">
               {uploadingCount > 0 || retryingCount > 0 ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                <UploadCloud className="w-5 h-5" />
+                <UploadCloud className="w-4 h-4" />
               )}
             </div>
           )}
@@ -96,12 +93,12 @@ export const UploadDock: React.FC = () => {
         {/* Text & Progress */}
         <button
           onClick={openUploadModal}
-          className="flex-1 text-left min-w-[170px] max-w-[220px] focus:outline-none"
+          className="flex-1 text-left min-w-[170px] max-w-[220px] focus:outline-none cursor-pointer"
         >
-          <div className="flex items-center justify-between text-xs font-semibold">
-            <span className="text-zinc-200 truncate">
+          <div className="flex items-center justify-between text-xs font-medium">
+            <span className="text-text-primary truncate">
               {allCompleted
-                ? 'All uploads completed'
+                ? 'All uploads complete'
                 : uploadingCount > 0
                 ? `Uploading (${completedCount + 1}/${tasks.length})`
                 : pausedCount > 0
@@ -110,47 +107,47 @@ export const UploadDock: React.FC = () => {
                 ? `${errorCount} failed`
                 : 'Queued'}
             </span>
-            <span className="font-mono text-indigo-400 text-[11px] ml-1">
+            <span className="font-mono text-accent text-[11px] ml-1 tabular-nums">
               {overallProgress}%
             </span>
           </div>
 
-          <div className="w-full h-1.5 bg-zinc-800 rounded-full mt-1.5 overflow-hidden">
+          <div className="w-full h-1 bg-surface rounded-full mt-1.5 overflow-hidden">
             <div
               className={`h-full transition-all duration-200 ${
                 allCompleted
-                  ? 'bg-emerald-500'
+                  ? 'bg-success'
                   : errorCount > 0 && uploadingCount === 0
-                  ? 'bg-rose-500'
-                  : 'bg-indigo-500'
+                  ? 'bg-danger'
+                  : 'bg-accent'
               }`}
               style={{ width: `${overallProgress}%` }}
             />
           </div>
 
-          <div className="flex items-center justify-between text-[10px] text-zinc-400 mt-1 font-mono">
+          <div className="flex items-center justify-between text-[10px] text-text-muted mt-1 font-mono tabular-nums">
             <span>{speedText || (allCompleted ? 'Saved to vault' : 'Resumable')}</span>
             <span>{etaText}</span>
           </div>
         </button>
 
         {/* Quick Actions */}
-        <div className="flex items-center gap-1.5 pl-2 border-l border-zinc-800 shrink-0">
+        <div className="flex items-center gap-1 pl-2 border-l border-border shrink-0">
           {uploadingCount > 0 ? (
             <button
               onClick={pauseAll}
               title="Pause all uploads"
-              className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-text-muted hover:text-warning hover:bg-surface rounded-md transition-colors"
             >
-              <Pause className="w-4 h-4" />
+              <Pause className="w-3.5 h-3.5" />
             </button>
           ) : pausedCount > 0 ? (
             <button
               onClick={resumeAll}
               title="Resume all paused"
-              className="p-1.5 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-text-muted hover:text-success hover:bg-surface rounded-md transition-colors"
             >
-              <Play className="w-4 h-4" />
+              <Play className="w-3.5 h-3.5" />
             </button>
           ) : null}
 
@@ -158,9 +155,9 @@ export const UploadDock: React.FC = () => {
             <button
               onClick={retryAllFailed}
               title="Retry failed uploads"
-              className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-danger hover:bg-danger/10 rounded-md transition-colors"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
 
@@ -168,17 +165,17 @@ export const UploadDock: React.FC = () => {
             <button
               onClick={clearCompleted}
               title="Dismiss"
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface rounded-md transition-colors"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           ) : (
             <button
               onClick={openUploadModal}
               title="Open full upload manager"
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface rounded-md transition-colors"
             >
-              <Maximize2 className="w-4 h-4" />
+              <Maximize2 className="w-3.5 h-3.5" />
             </button>
           )}
         </div>

@@ -47,6 +47,7 @@ async function getSuggestionsFromDatabase(currentVideoId?: string): Promise<IDbV
   if (isRealMongoUri) {
     try {
       if (mongoose.connection.readyState === 0) {
+        mongoose.set('bufferCommands', false);
         await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
       }
 
