@@ -236,10 +236,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }));
   };
 
-  // Web Audio API DSP Equalizer Hardware Graph
+  // Web Audio API DSP Equalizer Hardware Graph (Only active on non-default presets)
   const audioGraphRef = useRef<PlayerAudioGraph | null>(null);
 
   const initAudioGraph = useCallback(() => {
+    if (audioPreset === 'normal') return;
     if (!videoRef.current || audioGraphRef.current) return;
     try {
       const graph = createAudioGraph(videoRef.current);
@@ -253,7 +254,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [audioPreset]);
 
   useEffect(() => {
+    if (audioPreset === 'normal') {
+      if (audioGraphRef.current) {
+        applyDspPreset(audioGraphRef.current, 'normal');
+      }
+      return;
+    }
+    if (!audioGraphRef.current && videoRef.current) {
+      try {
+        const graph = createAudioGraph(videoRef.current);
+        if (graph) {
+          audioGraphRef.current = graph;
+        }
+      } catch (e) {
+        console.warn('Audio DSP initialization notice:', e);
+      }
+    }
     if (audioGraphRef.current) {
+      if (audioGraphRef.current.ctx.state === 'suspended') {
+        audioGraphRef.current.ctx.resume().catch(() => {});
+      }
       applyDspPreset(audioGraphRef.current, audioPreset);
     }
   }, [audioPreset]);
@@ -431,7 +451,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       } else if (video.duration && isFinite(video.duration) && video.duration > 0) {
         setDuration(video.duration);
       }
-      videoRef.current.volume = isMuted ? 0 : volume;
+      videoRef.current.muted = isMuted;
+      videoRef.current.volume = isMuted ? 0 : (volume > 0 ? volume : 1);
       videoRef.current.playbackRate = playbackSpeed;
 
       if (settings?.autoResume && video.lastPosition && !showResumePrompt) {
@@ -551,7 +572,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
+    if (audioGraphRef.current && audioGraphRef.current.ctx.state === 'suspended') {
+      audioGraphRef.current.ctx.resume().catch(() => {});
+    }
     if (videoRef.current.paused) {
+      if (!isMuted) {
+        videoRef.current.muted = false;
+        videoRef.current.volume = volume > 0 ? volume : 1;
+      }
       const playPromise = videoRef.current.play();
       if (playPromise !== undefined) {
         playPromise
@@ -585,7 +613,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setIsWaiting(false);
       setShowControls(true);
     }
-  }, []);
+  }, [isMuted, volume]);
 
   const handleDirectSeek = (newTime: number) => {
     const safeDuration = (duration && isFinite(duration) && duration > 0) ? duration : (video.duration || 0);
@@ -637,8 +665,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVol = parseFloat(e.target.value);
     setVolume(newVol);
-    setIsMuted(newVol === 0);
+    const shouldMute = newVol === 0;
+    setIsMuted(shouldMute);
     if (videoRef.current) {
+      videoRef.current.muted = shouldMute;
       videoRef.current.volume = newVol;
     }
     resetControlsTimeout();
@@ -646,10 +676,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const toggleMute = useCallback(() => {
     if (!videoRef.current) return;
-    if (isMuted) {
-      videoRef.current.volume = volume || 0.5;
+    if (isMuted || videoRef.current.muted) {
+      videoRef.current.muted = false;
+      const targetVol = volume > 0 ? volume : 1;
+      videoRef.current.volume = targetVol;
+      setVolume(targetVol);
       setIsMuted(false);
     } else {
+      videoRef.current.muted = true;
       videoRef.current.volume = 0;
       setIsMuted(true);
     }
@@ -1173,8 +1207,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           src={activeSrc}
           poster={resolvedThumbnail}
           preload="metadata"
+          muted={isMuted}
           crossOrigin={activeSrc.startsWith('/') || activeSrc.startsWith('blob:') || activeSrc.includes('zencdn.net') || activeSrc.includes('interactive-examples') || activeSrc.includes('githubusercontent') ? 'anonymous' : undefined}
-          onPlay={() => initAudioGraph()}
           onLoadedMetadata={handleLoadedMetadata}
           onDurationChange={() => {
             if (videoRef.current && videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {

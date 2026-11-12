@@ -24,6 +24,10 @@ export function createAudioGraph(mediaElement: HTMLMediaElement): PlayerAudioGra
     if (!AudioCtx) return null;
 
     const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
     const source = ctx.createMediaElementSource(mediaElement);
 
     // 1. Highpass filter to eliminate sub-audible rumble

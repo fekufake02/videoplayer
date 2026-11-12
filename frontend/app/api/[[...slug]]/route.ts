@@ -1058,14 +1058,12 @@ export async function GET(
     // If media blob is not present (or from interrupted previous chunk uploads),
     // automatically redirect to a reliable high-definition stream so playback works instantly!
     const sampleStreams = [
-      'https://media.w3.org/2010/05/bunny/trailer.mp4',
       'https://vjs.zencdn.net/v/oceans.mp4',
-      'https://media.w3.org/2010/05/sintel/trailer.mp4',
       'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-      'https://media.w3.org/2010/05/video/movie_300.mp4',
+      'https://raw.githubusercontent.com/bower-media-samples/big-buck-bunny-480p-30s/master/video.mp4',
     ];
     const hashNum = videoId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    const resolvedStream = (video.streamUrl && !video.streamUrl.includes('commondatastorage.googleapis.com'))
+    const resolvedStream = (video.streamUrl && !video.streamUrl.includes('commondatastorage.googleapis.com') && !video.streamUrl.includes('media.w3.org'))
       ? video.streamUrl
       : sampleStreams[hashNum % sampleStreams.length];
 

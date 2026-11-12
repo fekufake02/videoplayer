@@ -311,6 +311,8 @@ export default function DriveWatchPage() {
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       setDuration(videoRef.current.duration || 0);
+      videoRef.current.muted = isMuted;
+      videoRef.current.volume = isMuted ? 0 : (volume > 0 ? volume : 1);
       setIsBuffering(false);
     }
   };
@@ -318,6 +320,10 @@ export default function DriveWatchPage() {
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
+      if (!isMuted) {
+        videoRef.current.muted = false;
+        videoRef.current.volume = volume > 0 ? volume : 1;
+      }
       videoRef.current
         .play()
         .then(() => {
@@ -705,6 +711,7 @@ export default function DriveWatchPage() {
               src={streamSrc}
               poster={video.thumbnailUrl}
               preload="metadata"
+              muted={isMuted}
               playsInline
               loop={isLooping}
               onClick={togglePlay}
