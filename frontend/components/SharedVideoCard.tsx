@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
@@ -77,6 +77,14 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  // Synchronize thumbnail and favorite states when video prop changes (e.g. Recently Viewed, filtering)
+  useEffect(() => {
+    setThumbnailUrl(video.thumbnailUrl || null);
+    setImageLoaded(false);
+    setImageError(false);
+    setIsFavorite(Boolean(video.favorite));
+  }, [video._id, video.thumbnailUrl, video.favorite]);
 
   const isDrive = sourceType === 'drive';
   const watchHref = isDrive ? `/drive/watch/${video._id}` : `/watch/${video._id}`;

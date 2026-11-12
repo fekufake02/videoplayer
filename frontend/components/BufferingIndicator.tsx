@@ -57,47 +57,74 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [previewLoaded, setPreviewLoaded] = useState(false);
+  const [currentFrameTime, setCurrentFrameTime] = useState<number>(-1);
   const isSeekingRef = useRef(false);
   const pendingSeekTimeRef = useRef<number | null>(null);
-  const lastSeekTimeRef = useRef<number>(-1);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Synchronize live preview video to hover timestamp
-  useEffect(() => {
-    if (hoverTime === null || !previewVideoRef.current || !videoSrc) return;
+  const seekPreviewToTime = useCallback((time: number) => {
     const vid = previewVideoRef.current;
-    const safeDuration = duration && isFinite(duration) && duration > 0 ? duration : 0;
-    const target = Math.max(0, Math.min(safeDuration, hoverTime));
+    if (!vid) return;
 
-    if (Math.abs(lastSeekTimeRef.current - target) < 0.15) return;
+    if (vid.readyState < 1) {
+      pendingSeekTimeRef.current = time;
+      return;
+    }
 
-    if (!isSeekingRef.current) {
+    if (!vid.seeking && !isSeekingRef.current) {
       isSeekingRef.current = true;
-      lastSeekTimeRef.current = target;
+      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+      seekTimeoutRef.current = setTimeout(() => {
+        isSeekingRef.current = false;
+        if (pendingSeekTimeRef.current !== null && previewVideoRef.current) {
+          const next = pendingSeekTimeRef.current;
+          pendingSeekTimeRef.current = null;
+          seekPreviewToTime(next);
+        }
+      }, 150);
+
       try {
-        vid.currentTime = target;
+        vid.currentTime = time;
       } catch {
         isSeekingRef.current = false;
+        pendingSeekTimeRef.current = time;
       }
     } else {
-      pendingSeekTimeRef.current = target;
+      pendingSeekTimeRef.current = time;
     }
-  }, [hoverTime, duration, videoSrc]);
+  }, []);
 
   const handlePreviewSeeked = () => {
+    if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+    isSeekingRef.current = false;
     setPreviewLoaded(true);
+    if (previewVideoRef.current) {
+      setCurrentFrameTime(previewVideoRef.current.currentTime);
+    }
     if (pendingSeekTimeRef.current !== null && previewVideoRef.current) {
       const nextTime = pendingSeekTimeRef.current;
       pendingSeekTimeRef.current = null;
-      lastSeekTimeRef.current = nextTime;
-      try {
-        previewVideoRef.current.currentTime = nextTime;
-      } catch {
-        isSeekingRef.current = false;
-      }
-    } else {
-      isSeekingRef.current = false;
+      seekPreviewToTime(nextTime);
     }
   };
+
+  const handlePreviewMetadata = () => {
+    if (pendingSeekTimeRef.current !== null) {
+      const nextTime = pendingSeekTimeRef.current;
+      pendingSeekTimeRef.current = null;
+      seekPreviewToTime(nextTime);
+    } else if (hoverTime !== null) {
+      seekPreviewToTime(hoverTime);
+    }
+  };
+
+  // Synchronize live preview video to hover timestamp
+  useEffect(() => {
+    if (hoverTime === null || !videoSrc) return;
+    const safeDuration = duration && isFinite(duration) && duration > 0 ? duration : 0;
+    const target = Math.max(0, Math.min(safeDuration, hoverTime));
+    seekPreviewToTime(target);
+  }, [hoverTime, duration, videoSrc, seekPreviewToTime]);
 
   if (!duration || duration <= 0) return null;
 
@@ -224,15 +251,21 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
     >
-      {/* Timeline Thumbnail Preview or Time Tooltip */}
-      {hoverPosition !== null && hoverTime !== null && (() => {
+      {/* Persistent Live Thumbnail Preview & Tooltip */}
+      {(() => {
         const containerWidth = progressBarRef.current?.clientWidth || 300;
         const previewWidth = 160;
         const previewHeight = 90;
-        const clampedX = calculatePreviewClampedX(hoverPosition, containerWidth, previewWidth);
+        const isHovering = hoverPosition !== null && hoverTime !== null;
+        const effectiveHoverTime = hoverTime !== null ? hoverTime : 0;
+        const clampedX = calculatePreviewClampedX(
+          hoverPosition !== null ? hoverPosition : 0,
+          containerWidth,
+          previewWidth
+        );
 
-        // Optional contact sheet sprite style if genuine contact sheet available
-        const frameIndex = getFrameIndexForTime(hoverTime, duration, totalFrames);
+        // Contact sheet sprite style for hovered time
+        const frameIndex = getFrameIndexForTime(effectiveHoverTime, duration, totalFrames);
         const sprite = contactSheetUrl
           ? getContactSheetSpriteStyle(frameIndex, {
               cols,
@@ -243,9 +276,18 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
             })
           : null;
 
+        // Ensure we only show the live decoded video frame if it has actually decoded near the hovered time
+        const isFrameAccurate =
+          previewLoaded &&
+          hoverTime !== null &&
+          currentFrameTime >= 0 &&
+          Math.abs(currentFrameTime - effectiveHoverTime) <= Math.max(2.5, duration * 0.05);
+
         return (
           <div
-            className="absolute bottom-full mb-3.5 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-50"
+            className={`absolute bottom-full mb-3.5 pointer-events-none transform -translate-x-1/2 transition-all duration-150 z-50 ${
+              isHovering ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+            }`}
             style={{ left: `${clampedX}px` }}
           >
             <div className="w-[160px] h-[90px] rounded-xl overflow-hidden border border-white/20 shadow-2xl bg-[#090A0F] relative flex flex-col justify-end ring-1 ring-accent/30">
@@ -262,7 +304,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
               )}
 
               {/* Layer 2: Thumbnail poster image fallback if no contact sheet */}
-              {!contactSheetUrl && thumbnailUrl && !previewLoaded && (
+              {!contactSheetUrl && thumbnailUrl && (
                 <img
                   src={thumbnailUrl}
                   alt=""
@@ -270,7 +312,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
                 />
               )}
 
-              {/* Layer 3: Live Native Video Frame Preview (Decodes exact frame for both Drive & B2 streams) */}
+              {/* Layer 3: Live Native Video Frame Preview (Decodes exact frame) */}
               {videoSrc && (
                 <video
                   ref={previewVideoRef}
@@ -278,10 +320,11 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
                   muted
                   playsInline
                   preload="auto"
+                  onLoadedMetadata={handlePreviewMetadata}
                   onSeeked={handlePreviewSeeked}
                   onLoadedData={() => setPreviewLoaded(true)}
                   className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-150 ${
-                    previewLoaded ? 'opacity-100' : 'opacity-80'
+                    isFrameAccurate ? 'opacity-100' : 'opacity-0'
                   }`}
                 />
               )}
@@ -298,7 +341,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
 
               {/* Layer 6: Timestamp pill with tabular numbers */}
               <div className="relative z-10 mx-auto mb-1.5 px-2 py-0.5 rounded-md bg-black/85 backdrop-blur-md border border-white/10 text-white font-mono text-[11px] font-bold tabular-nums shadow">
-                {formatTimestamp(hoverTime)}
+                {formatTimestamp(effectiveHoverTime)}
               </div>
             </div>
           </div>

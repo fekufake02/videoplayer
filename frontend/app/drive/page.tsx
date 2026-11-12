@@ -28,6 +28,7 @@ export default function DriveGalleryPage() {
   const [toastMsg, setToastMsg] = useState<string>('');
 
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [sortBy, setSortBy] = useState<string>('recentlyAdded');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -38,19 +39,30 @@ export default function DriveGalleryPage() {
     }
   }, [isLoading, isAuthenticated, router]);
 
-  const fetchDriveVideos = useCallback(async () => {
-    setLoading(true);
+  // Debounce search query to prevent frequent re-fetching while typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const fetchDriveVideos = useCallback(async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+    }
     setErrorMsg('');
     try {
       const res = await api.listDriveVideos({
         limit: 500,
-        search: searchQuery,
+        search: debouncedSearch,
         sort: sortBy,
       });
 
       if (res?.success) {
         setVideos(res.videos || []);
-        if (!res.videos || res.videos.length === 0) {
+        // Only trigger auto-sync on initial load if library is completely empty and no search active
+        if ((!res.videos || res.videos.length === 0) && isInitial && !debouncedSearch) {
           api.syncDriveFolder()
             .then((syncRes) => {
               if (syncRes?.videos && syncRes.videos.length > 0) {
@@ -66,23 +78,13 @@ export default function DriveGalleryPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, sortBy]);
+  }, [debouncedSearch, sortBy]);
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchDriveVideos();
+      fetchDriveVideos(videos.length === 0);
     }
-  }, [isAuthenticated, fetchDriveVideos]);
-
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && isAuthenticated) {
-        fetchDriveVideos();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isAuthenticated, fetchDriveVideos]);
+  }, [isAuthenticated, debouncedSearch, sortBy]);
 
   const handleSyncFolder = async () => {
     setIsSyncing(true);

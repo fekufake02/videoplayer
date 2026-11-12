@@ -18,6 +18,15 @@ const outfit = Outfit({
 export const metadata: Metadata = {
   title: 'My Vault - Media & Video Player',
   description: 'An elegant, private video vault and streaming player with Backblaze B2 and Google Drive integration.',
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/icon.png', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/icon.png', type: 'image/png' },
+    ],
+  },
   openGraph: {
     title: 'My Vault - Media & Video Player',
     description: 'An elegant, private video vault and streaming player with Backblaze B2 and Google Drive integration.',

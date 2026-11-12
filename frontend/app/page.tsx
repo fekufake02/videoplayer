@@ -11,6 +11,7 @@ import { Navbar } from '../components/Navbar';
 import { VideoCard } from '../components/VideoCard';
 import { VideoGrid } from '../components/VideoGrid';
 import { LibrarySidebar, LibraryNavSection } from '../components/LibrarySidebar';
+import { ThumbnailLoader } from '../components/ThumbnailLoader';
 import { EditMetadataModal } from '../components/EditMetadataModal';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
 import { PlayCircle, Clock, Sparkles, Heart, Play, ChevronRight, FolderHeart, Plus, Trash2, ListMusic } from 'lucide-react';
@@ -397,17 +398,13 @@ export default function LibraryHomePage() {
                         href={`/watch/${vid._id}`}
                         className="relative w-28 sm:w-32 aspect-video bg-[#090A0F] rounded-lg overflow-hidden shrink-0 flex items-center justify-center cursor-pointer group-hover:scale-102 transition-transform"
                       >
-                        {vid.thumbnailUrl ? (
-                          <img
-                            src={vid.thumbnailUrl}
-                            alt={vid.title}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-zinc-900">
-                            <Play className="w-4 h-4 text-slate-500 fill-current" />
-                          </div>
-                        )}
+                        <ThumbnailLoader
+                          videoId={vid._id}
+                          src={vid.thumbnailUrl}
+                          fallbackText={vid.title}
+                          alt={vid.title}
+                          className="w-full h-full object-cover"
+                        />
                         <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                           <div className="w-7 h-7 rounded-full bg-indigo-500 text-white flex items-center justify-center">
                             <Play className="w-3 h-3 fill-current translate-x-0.5" />
