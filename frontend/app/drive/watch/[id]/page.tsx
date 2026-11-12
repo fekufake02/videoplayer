@@ -783,6 +783,8 @@ export default function DriveWatchPage() {
                 isBuffering={isBuffering}
                 onSeek={handleDirectSeek}
                 contactSheetUrl={contactSheetUrl}
+                videoSrc={video?.driveStreamUrl}
+                thumbnailUrl={video?.thumbnailUrl}
               />
 
               {/* Control Buttons Row */}

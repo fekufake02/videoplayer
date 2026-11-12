@@ -5,20 +5,38 @@ import {
   ContactSheetConfig,
 } from './contactSheet';
 
+// Versioned cache prefix to prevent stale or corrupted placeholder entries
+const CACHE_PREFIX = 'vault_contact_sheet_v4_';
+
 // In-memory contact sheet data cache: videoId -> dataUrl
 const contactSheetCache = new Map<string, string>();
+
+// Clean up any legacy unversioned or dummy contact sheet entries in localStorage
+if (typeof window !== 'undefined') {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('vault_contact_sheet_') && !key.startsWith(CACHE_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
 
 /**
  * Returns cached contact sheet data URL if available
  */
 export function getCachedContactSheet(videoId: string): string | null {
+  if (!videoId) return null;
   if (contactSheetCache.has(videoId)) {
     return contactSheetCache.get(videoId)!;
   }
   if (typeof window !== 'undefined') {
     try {
-      const stored = localStorage.getItem(`vault_contact_sheet_${videoId}`);
-      if (stored) {
+      const stored = localStorage.getItem(`${CACHE_PREFIX}${videoId}`);
+      if (stored && stored.startsWith('data:image/')) {
         contactSheetCache.set(videoId, stored);
         return stored;
       }
@@ -31,17 +49,18 @@ export function getCachedContactSheet(videoId: string): string | null {
  * Saves contact sheet data URL to memory and local storage
  */
 export function setCachedContactSheet(videoId: string, dataUrl: string): void {
+  if (!videoId || !dataUrl) return;
   contactSheetCache.set(videoId, dataUrl);
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(`vault_contact_sheet_${videoId}`, dataUrl);
+      localStorage.setItem(`${CACHE_PREFIX}${videoId}`, dataUrl);
     } catch {}
   }
 }
 
 /**
- * Generates a compact contact sheet grid canvas from an active video element
- * or video stream URL. Samples 10 frames across video duration.
+ * Generates a contact sheet grid canvas only when real video frames can be extracted.
+ * Samples frames across video duration. Never draws fake dummy circles.
  */
 export async function generateContactSheet(
   videoSource: HTMLVideoElement | string,
@@ -66,11 +85,10 @@ export async function generateContactSheet(
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
 
-  // Dark placeholder base
-  ctx.fillStyle = '#0f172a';
+  // Dark clean background base
+  ctx.fillStyle = '#090A0F';
   ctx.fillRect(0, 0, totalWidth, totalHeight);
 
-  // If active video element is already provided and ready, we can sample frames or create a clone
   const isVideoElement = typeof HTMLVideoElement !== 'undefined' && videoSource instanceof HTMLVideoElement;
   let videoUrl: string = '';
 
@@ -82,7 +100,7 @@ export async function generateContactSheet(
 
   if (!videoUrl) return null;
 
-  // Sample timestamps: e.g. 10 frames evenly spaced at 5%, 15%, 25%, ..., 95% of duration
+  // Sample timestamps evenly across duration
   const sampleTimestamps: number[] = [];
   const step = duration / config.totalFrames;
   for (let i = 0; i < config.totalFrames; i++) {
@@ -90,34 +108,6 @@ export async function generateContactSheet(
   }
 
   try {
-    // Render placeholders with timestamps while frames load
-    for (let i = 0; i < config.totalFrames; i++) {
-      const col = i % config.cols;
-      const row = Math.floor(i / config.cols);
-      const x = col * config.tileWidth;
-      const y = row * config.tileHeight;
-
-      // Dark cell background with subtle border
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(x + 1, y + 1, config.tileWidth - 2, config.tileHeight - 2);
-
-      // Play icon badge
-      ctx.fillStyle = '#f59e0b';
-      ctx.beginPath();
-      ctx.arc(x + config.tileWidth / 2, y + config.tileHeight / 2 - 6, 12, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Timestamp indicator text
-      const timeSecs = sampleTimestamps[i];
-      const mins = Math.floor(timeSecs / 60);
-      const secs = Math.floor(timeSecs % 60);
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`${mins}:${secs.toString().padStart(2, '0')}`, x + config.tileWidth / 2, y + config.tileHeight - 10);
-    }
-
-    // Try offscreen sequential frame extraction
     const offscreenVideo = document.createElement('video');
     offscreenVideo.crossOrigin = 'anonymous';
     offscreenVideo.muted = true;
@@ -125,7 +115,9 @@ export async function generateContactSheet(
     offscreenVideo.preload = 'metadata';
     offscreenVideo.src = videoUrl;
 
-    const frameResult = await new Promise<boolean>((resolve) => {
+    let successfulFrames = 0;
+
+    await new Promise<boolean>((resolve) => {
       let currentSampleIndex = 0;
       let timeoutId: NodeJS.Timeout | null = null;
 
@@ -145,8 +137,21 @@ export async function generateContactSheet(
           const x = col * config.tileWidth;
           const y = row * config.tileHeight;
           try {
-            ctx.drawImage(offscreenVideo, 0, 0, offscreenVideo.videoWidth, offscreenVideo.videoHeight, x, y, config.tileWidth, config.tileHeight);
-          } catch {}
+            ctx.drawImage(
+              offscreenVideo,
+              0,
+              0,
+              offscreenVideo.videoWidth,
+              offscreenVideo.videoHeight,
+              x,
+              y,
+              config.tileWidth,
+              config.tileHeight
+            );
+            successfulFrames++;
+          } catch {
+            // Tainted canvas or draw failure — ignore frame
+          }
         }
         currentSampleIndex++;
         seekNext();
@@ -161,21 +166,28 @@ export async function generateContactSheet(
         resolve(false);
       });
 
-      // Safety timeout: 4 seconds max for contact sheet generation
+      // Safety timeout
       timeoutId = setTimeout(() => {
-        resolve(true);
-      }, 4000);
+        resolve(successfulFrames > 0);
+      }, 5000);
 
       offscreenVideo.load();
     });
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
-    if (videoId && dataUrl && dataUrl.length > 100) {
-      setCachedContactSheet(videoId, dataUrl);
+    // Only export and cache if real frames were captured
+    if (successfulFrames >= 2) {
+      try {
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        if (videoId && dataUrl && dataUrl.length > 500) {
+          setCachedContactSheet(videoId, dataUrl);
+        }
+        return dataUrl;
+      } catch {
+        return null;
+      }
     }
-    return dataUrl;
-  } catch (err) {
-    console.warn('Contact sheet generation failed:', err);
+    return null;
+  } catch {
     return null;
   }
 }

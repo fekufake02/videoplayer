@@ -19,6 +19,8 @@ interface BufferingIndicatorProps {
   onSeek: (targetTime: number) => void;
   maxBufferAhead?: number;
   contactSheetUrl?: string | null;
+  videoSrc?: string;
+  thumbnailUrl?: string;
   totalFrames?: number;
   cols?: number;
   rows?: number;
@@ -39,6 +41,8 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
   isBuffering: _isBuffering,
   onSeek,
   contactSheetUrl,
+  videoSrc,
+  thumbnailUrl,
   totalFrames = 10,
   cols = 5,
   rows = 2,
@@ -47,10 +51,53 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
   abRepeat,
 }) => {
   const progressBarRef = useRef<HTMLDivElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const [previewLoaded, setPreviewLoaded] = useState(false);
+  const isSeekingRef = useRef(false);
+  const pendingSeekTimeRef = useRef<number | null>(null);
+  const lastSeekTimeRef = useRef<number>(-1);
+
+  // Synchronize live preview video to hover timestamp
+  useEffect(() => {
+    if (hoverTime === null || !previewVideoRef.current || !videoSrc) return;
+    const vid = previewVideoRef.current;
+    const safeDuration = duration && isFinite(duration) && duration > 0 ? duration : 0;
+    const target = Math.max(0, Math.min(safeDuration, hoverTime));
+
+    if (Math.abs(lastSeekTimeRef.current - target) < 0.15) return;
+
+    if (!isSeekingRef.current) {
+      isSeekingRef.current = true;
+      lastSeekTimeRef.current = target;
+      try {
+        vid.currentTime = target;
+      } catch {
+        isSeekingRef.current = false;
+      }
+    } else {
+      pendingSeekTimeRef.current = target;
+    }
+  }, [hoverTime, duration, videoSrc]);
+
+  const handlePreviewSeeked = () => {
+    setPreviewLoaded(true);
+    if (pendingSeekTimeRef.current !== null && previewVideoRef.current) {
+      const nextTime = pendingSeekTimeRef.current;
+      pendingSeekTimeRef.current = null;
+      lastSeekTimeRef.current = nextTime;
+      try {
+        previewVideoRef.current.currentTime = nextTime;
+      } catch {
+        isSeekingRef.current = false;
+      }
+    } else {
+      isSeekingRef.current = false;
+    }
+  };
 
   if (!duration || duration <= 0) return null;
 
@@ -180,59 +227,79 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
       {/* Timeline Thumbnail Preview or Time Tooltip */}
       {hoverPosition !== null && hoverTime !== null && (() => {
         const containerWidth = progressBarRef.current?.clientWidth || 300;
-        const previewWidth = 140;
-        const previewHeight = 78;
+        const previewWidth = 160;
+        const previewHeight = 90;
         const clampedX = calculatePreviewClampedX(hoverPosition, containerWidth, previewWidth);
 
-        if (contactSheetUrl) {
-          const frameIndex = getFrameIndexForTime(hoverTime, duration, totalFrames);
-          const sprite = getContactSheetSpriteStyle(frameIndex, {
-            cols,
-            rows,
-            totalFrames,
-            tileWidth: previewWidth,
-            tileHeight: previewHeight,
-          });
+        // Optional contact sheet sprite style if genuine contact sheet available
+        const frameIndex = getFrameIndexForTime(hoverTime, duration, totalFrames);
+        const sprite = contactSheetUrl
+          ? getContactSheetSpriteStyle(frameIndex, {
+              cols,
+              rows,
+              totalFrames,
+              tileWidth: previewWidth,
+              tileHeight: previewHeight,
+            })
+          : null;
 
-          return (
-            <div
-              className="absolute bottom-full mb-3 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
-              style={{ left: `${clampedX}px` }}
-            >
-              <div className="w-[140px] h-[78px] rounded-xl overflow-hidden border border-accent/60 shadow-2xl bg-[#090A0F] relative flex flex-col justify-end">
-                {/* Contact sheet sprite background */}
+        return (
+          <div
+            className="absolute bottom-full mb-3.5 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-50"
+            style={{ left: `${clampedX}px` }}
+          >
+            <div className="w-[160px] h-[90px] rounded-xl overflow-hidden border border-white/20 shadow-2xl bg-[#090A0F] relative flex flex-col justify-end ring-1 ring-accent/30">
+              {/* Layer 1: Contact sheet sprite if available */}
+              {contactSheetUrl && sprite && (
                 <div
-                  className="absolute inset-0 bg-no-repeat"
+                  className="absolute inset-0 bg-no-repeat transition-opacity duration-150"
                   style={{
                     backgroundImage: `url(${contactSheetUrl})`,
                     backgroundPosition: sprite.backgroundPosition,
                     backgroundSize: sprite.backgroundSize,
                   }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent pointer-events-none" />
-                {/* Chapter name inside preview */}
-                {activeHoverChapter && (
-                  <div className="relative z-10 text-[9px] text-accent font-semibold px-2 truncate text-center">
-                    {activeHoverChapter.title}
-                  </div>
-                )}
-                {/* Timestamp pill */}
-                <div className="relative z-10 mx-auto mb-1 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md border border-white/10 text-white font-mono text-[10px] font-bold tabular-nums">
-                  {formatTimestamp(hoverTime)}
-                </div>
-              </div>
-            </div>
-          );
-        }
+              )}
 
-        return (
-          <div
-            className="absolute bottom-full mb-2 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
-            style={{ left: `${hoverPosition}px` }}
-          >
-            <div className="bg-[#151925]/95 backdrop-blur-md text-accent text-xs font-mono font-bold px-2.5 py-1 rounded-lg border border-accent/30 shadow-2xl whitespace-nowrap tabular-nums">
-              {activeHoverChapter ? `${activeHoverChapter.title} • ` : ''}
-              {formatTimestamp(hoverTime)}
+              {/* Layer 2: Thumbnail poster image fallback if no contact sheet */}
+              {!contactSheetUrl && thumbnailUrl && !previewLoaded && (
+                <img
+                  src={thumbnailUrl}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover opacity-60"
+                />
+              )}
+
+              {/* Layer 3: Live Native Video Frame Preview (Decodes exact frame for both Drive & B2 streams) */}
+              {videoSrc && (
+                <video
+                  ref={previewVideoRef}
+                  src={videoSrc}
+                  muted
+                  playsInline
+                  preload="auto"
+                  onSeeked={handlePreviewSeeked}
+                  onLoadedData={() => setPreviewLoaded(true)}
+                  className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-150 ${
+                    previewLoaded ? 'opacity-100' : 'opacity-80'
+                  }`}
+                />
+              )}
+
+              {/* Layer 4: Dark gradient overlay for text readability */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-transparent pointer-events-none" />
+
+              {/* Layer 5: Chapter name inside preview */}
+              {activeHoverChapter && (
+                <div className="relative z-10 text-[9px] text-accent font-semibold px-2 truncate text-center mb-0.5">
+                  {activeHoverChapter.title}
+                </div>
+              )}
+
+              {/* Layer 6: Timestamp pill with tabular numbers */}
+              <div className="relative z-10 mx-auto mb-1.5 px-2 py-0.5 rounded-md bg-black/85 backdrop-blur-md border border-white/10 text-white font-mono text-[11px] font-bold tabular-nums shadow">
+                {formatTimestamp(hoverTime)}
+              </div>
             </div>
           </div>
         );
