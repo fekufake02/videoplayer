@@ -132,7 +132,7 @@ const initialVideos: IVideoItem[] = [
     title: 'Big Buck Bunny (4K Ultra HD)',
     originalFilename: 'big_buck_bunny_4k.mp4',
     storageKey: 'videos/vid-1/original/big_buck_bunny.mp4',
-    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    streamUrl: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 158008374,
@@ -151,7 +151,7 @@ const initialVideos: IVideoItem[] = [
     title: 'Tears of Steel (Sci-Fi VFX)',
     originalFilename: 'tears_of_steel_1080p.mp4',
     storageKey: 'videos/vid-2/original/tears_of_steel.mp4',
-    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    streamUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 245100920,
@@ -170,7 +170,7 @@ const initialVideos: IVideoItem[] = [
     title: 'Sintel — The Dragon Seeker',
     originalFilename: 'sintel_trailer.mp4',
     storageKey: 'videos/vid-3/original/sintel.mp4',
-    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+    streamUrl: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 112450890,
@@ -189,7 +189,7 @@ const initialVideos: IVideoItem[] = [
     title: 'For Bigger Blazes (Action Demo)',
     originalFilename: 'for_bigger_blazes.mp4',
     storageKey: 'videos/vid-4/original/for_bigger_blazes.mp4',
-    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    streamUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 89340000,
@@ -208,7 +208,7 @@ const initialVideos: IVideoItem[] = [
     title: 'We Are Going On Bullrun (Automotive)',
     originalFilename: 'bullrun_rally.mp4',
     storageKey: 'videos/vid-5/original/bullrun_rally.mp4',
-    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+    streamUrl: 'https://media.w3.org/2010/05/video/movie_300.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 94500000,
@@ -271,7 +271,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 596,
     thumbnailUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1q6vL9kGzZ4Z_drive_sample_01/view',
-    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    driveStreamUrl: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 1,
@@ -289,7 +289,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 47,
     thumbnailUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1m9pW2bRxY7A_drive_sample_02/view',
-    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+    driveStreamUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 0,
@@ -307,7 +307,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 888,
     thumbnailUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1t4yU8oVxC3B_drive_sample_03/view',
-    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+    driveStreamUrl: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 4,
@@ -325,7 +325,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 734,
     thumbnailUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1x5zE6vNqM9K_drive_sample_04/view',
-    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    driveStreamUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 2,
@@ -343,7 +343,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 15,
     thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1w3rT7kLpB2D_drive_sample_05/view',
-    driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    driveStreamUrl: 'https://media.w3.org/2010/05/video/movie_300.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 0,
@@ -484,13 +484,13 @@ function loadVideosFromDisk() {
 }
 
 function repairVideoItem(v: IVideoItem) {
-  // Sample playable streams for automatic fallback
+  // Reliable sample streams for automatic fallback
   const sampleStreams = [
-    { url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', duration: 596 },
-    { url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4', duration: 734 },
-    { url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4', duration: 888 },
-    { url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', duration: 15 },
-    { url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4', duration: 47 },
+    { url: 'https://media.w3.org/2010/05/bunny/trailer.mp4', duration: 596 },
+    { url: 'https://vjs.zencdn.net/v/oceans.mp4', duration: 47 },
+    { url: 'https://media.w3.org/2010/05/sintel/trailer.mp4', duration: 888 },
+    { url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', duration: 734 },
+    { url: 'https://media.w3.org/2010/05/video/movie_300.mp4', duration: 15 },
   ];
 
   const hashNum = v._id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
@@ -504,7 +504,7 @@ function repairVideoItem(v: IVideoItem) {
   // Check if media exists locally on disk or memory
   const hasLocalBlob = uploadedBlobs.has(v.storageKey) || !!readDiskMedia(v.storageKey);
   if (!hasLocalBlob) {
-    if (!v.streamUrl || v.streamUrl.startsWith('/api/')) {
+    if (!v.streamUrl || v.streamUrl.startsWith('/api/') || v.streamUrl.includes('commondatastorage.googleapis.com')) {
       v.streamUrl = sample.url;
     }
   } else {
@@ -941,11 +941,12 @@ export async function GET(
     repairVideoItem(video);
 
     const hasLocal = uploadedBlobs.has(video.storageKey) || !!readDiskMedia(video.storageKey);
+    const fallbackUrl = 'https://media.w3.org/2010/05/bunny/trailer.mp4';
     const streamUrl = hasLocal
       ? `/api/videos/${videoId}/raw`
-      : (video.streamUrl && !video.streamUrl.startsWith('/api/')
+      : (video.streamUrl && !video.streamUrl.startsWith('/api/') && !video.streamUrl.includes('commondatastorage.googleapis.com')
           ? video.streamUrl
-          : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
+          : fallbackUrl);
 
     return NextResponse.json({
       success: true,
@@ -1057,13 +1058,16 @@ export async function GET(
     // If media blob is not present (or from interrupted previous chunk uploads),
     // automatically redirect to a reliable high-definition stream so playback works instantly!
     const sampleStreams = [
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      'https://media.w3.org/2010/05/bunny/trailer.mp4',
+      'https://vjs.zencdn.net/v/oceans.mp4',
+      'https://media.w3.org/2010/05/sintel/trailer.mp4',
+      'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+      'https://media.w3.org/2010/05/video/movie_300.mp4',
     ];
     const hashNum = videoId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    const resolvedStream = video.streamUrl || sampleStreams[hashNum % sampleStreams.length];
+    const resolvedStream = (video.streamUrl && !video.streamUrl.includes('commondatastorage.googleapis.com'))
+      ? video.streamUrl
+      : sampleStreams[hashNum % sampleStreams.length];
 
     video.streamUrl = resolvedStream;
     if (!video.duration || video.duration <= 0) {

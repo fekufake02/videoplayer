@@ -87,7 +87,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (data.settings) setSettings(data.settings);
         // Only on initial cold load / mount should it be locked (unless on /login)
         if (isInitialColdMount) {
-          const isSessionUnlocked = typeof window !== 'undefined' && sessionStorage.getItem('vault_unlocked') === 'true';
+          const isSessionUnlocked = typeof window !== 'undefined' && (
+            sessionStorage.getItem('vault_unlocked') === 'true' ||
+            localStorage.getItem('vault_unlocked') === 'true'
+          );
           if (!isSessionUnlocked && window.location.pathname !== '/login') {
             setIsLocked(true);
             setIsPrivacyActive(true);
@@ -151,6 +154,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsLocked(false);
       setIsPrivacyActive(false);
       sessionStorage.setItem('vault_unlocked', 'true');
+      localStorage.setItem('vault_unlocked', 'true');
       if (pathname === '/login') {
         router.push('/');
       }
@@ -168,6 +172,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsPrivacyActive(false);
       setIsLocked(false);
       sessionStorage.removeItem('vault_unlocked');
+      localStorage.removeItem('vault_unlocked');
       router.push('/login');
     }
   };
@@ -215,12 +220,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsLocked(true);
     setIsPrivacyActive(true);
     sessionStorage.removeItem('vault_unlocked');
+    localStorage.removeItem('vault_unlocked');
     triggerPrivacyLockout();
   }, [triggerPrivacyLockout]);
 
   const unlockApp = useCallback(() => {
     setIsLocked(false);
     setIsPrivacyActive(false);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('vault_unlocked', 'true');
+      localStorage.setItem('vault_unlocked', 'true');
+    }
   }, []);
 
   // Decoy Mode Controls

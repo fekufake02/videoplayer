@@ -68,17 +68,17 @@ export default function WatchPage() {
       if (detailsRes.success && streamRes.success) {
         setVideo(detailsRes.video);
         const sampleStreams = [
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+          'https://media.w3.org/2010/05/bunny/trailer.mp4',
+          'https://vjs.zencdn.net/v/oceans.mp4',
+          'https://media.w3.org/2010/05/sintel/trailer.mp4',
+          'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+          'https://media.w3.org/2010/05/video/movie_300.mp4',
         ];
         const hashNum = (id || 'vid').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
         const fallback = sampleStreams[hashNum % sampleStreams.length];
 
         const streamUrlCandidate = streamRes.streamUrl || detailsRes.video.streamUrl;
-        const resolvedStream = (streamUrlCandidate && streamUrlCandidate.trim().length > 0)
+        const resolvedStream = (streamUrlCandidate && streamUrlCandidate.trim().length > 0 && !streamUrlCandidate.includes('commondatastorage.googleapis.com'))
           ? streamUrlCandidate
           : fallback;
         setStreamUrl(resolvedStream);

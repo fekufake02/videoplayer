@@ -319,7 +319,7 @@ export class DriveService {
         size: 142600500,
         thumbnailUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
         driveViewUrl: 'https://drive.google.com/file/d/1q6vL9kGzZ4Z_drive_sample_01/view',
-        driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        driveStreamUrl: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
       },
       {
         driveFileId: '1m9pW2bRxY7A_drive_sample_02',
@@ -329,7 +329,7 @@ export class DriveService {
         size: 198450000,
         thumbnailUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&auto=format&fit=crop&q=80',
         driveViewUrl: 'https://drive.google.com/file/d/1m9pW2bRxY7A_drive_sample_02/view',
-        driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+        driveStreamUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
       },
       {
         driveFileId: '1t4yU8oVxC3B_drive_sample_03',
@@ -339,7 +339,7 @@ export class DriveService {
         size: 112800000,
         thumbnailUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop&q=80',
         driveViewUrl: 'https://drive.google.com/file/d/1t4yU8oVxC3B_drive_sample_03/view',
-        driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+        driveStreamUrl: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
       },
       {
         driveFileId: '1x5zE6vNqM9K_drive_sample_04',
@@ -349,7 +349,7 @@ export class DriveService {
         size: 260300400,
         thumbnailUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
         driveViewUrl: 'https://drive.google.com/file/d/1x5zE6vNqM9K_drive_sample_04/view',
-        driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+        driveStreamUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
       },
       {
         driveFileId: '1w3rT7kLpB2D_drive_sample_05',
@@ -359,7 +359,7 @@ export class DriveService {
         size: 78500200,
         thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=80',
         driveViewUrl: 'https://drive.google.com/file/d/1w3rT7kLpB2D_drive_sample_05/view',
-        driveStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+        driveStreamUrl: 'https://media.w3.org/2010/05/video/movie_300.mp4',
       },
     ];
   }

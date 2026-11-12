@@ -119,6 +119,7 @@ export async function generateContactSheet(
 
     // Try offscreen sequential frame extraction
     const offscreenVideo = document.createElement('video');
+    offscreenVideo.crossOrigin = 'anonymous';
     offscreenVideo.muted = true;
     offscreenVideo.playsInline = true;
     offscreenVideo.preload = 'metadata';

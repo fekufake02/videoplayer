@@ -62,20 +62,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
       : undefined);
 
   const sampleStreams = [
-    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+    'https://media.w3.org/2010/05/bunny/trailer.mp4',
+    'https://vjs.zencdn.net/v/oceans.mp4',
+    'https://media.w3.org/2010/05/sintel/trailer.mp4',
+    'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    'https://media.w3.org/2010/05/video/movie_300.mp4',
   ];
   const hashNum = (video._id || video.title || 'vid').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   const reliableSample = sampleStreams[hashNum % sampleStreams.length];
 
   const getReliableSource = (url?: string) => {
+    if (url && url.includes('commondatastorage.googleapis.com')) {
+      return reliableSample;
+    }
     if (url && url.trim().length > 0 && !url.endsWith('/undefined')) {
       return url;
     }
-    if (video.streamUrl && video.streamUrl.trim().length > 0) {
+    if (video.streamUrl && video.streamUrl.trim().length > 0 && !video.streamUrl.includes('commondatastorage.googleapis.com')) {
       return video.streamUrl;
     }
     return reliableSample;
@@ -86,16 +89,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const hlsPlayerRef = useRef<any>(null);
 
   useEffect(() => {
-    if (streamUrl && streamUrl.trim().length > 0) {
+    if (streamUrl && streamUrl.trim().length > 0 && !streamUrl.includes('commondatastorage.googleapis.com')) {
       setActiveSrc(streamUrl);
-    } else if (video.streamUrl) {
+    } else if (video.streamUrl && !video.streamUrl.includes('commondatastorage.googleapis.com')) {
       setActiveSrc(video.streamUrl);
+    } else {
+      setActiveSrc(reliableSample);
     }
-  }, [streamUrl, video.streamUrl]);
+  }, [streamUrl, video.streamUrl, reliableSample]);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMediaReady, setIsMediaReady] = useState(false);
-  const [isWaiting, setIsWaiting] = useState(true);
+  const [isWaiting, setIsWaiting] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(video.duration || 0);
   const [volume, setVolume] = useState(settings?.defaultVolume ?? 1);
@@ -947,7 +952,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           onTimeUpdate={handleTimeUpdate}
           onWaiting={() => setIsWaiting(true)}
           onSeeking={() => setIsWaiting(true)}
-          onLoadStart={() => setIsWaiting(true)}
+          onLoadStart={() => {
+            if (isPlaying) setIsWaiting(true);
+          }}
           onLoadedData={handleMediaReady}
           onCanPlay={handleMediaReady}
           onCanPlayThrough={handleMediaReady}
