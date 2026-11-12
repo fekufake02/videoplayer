@@ -58,7 +58,7 @@ export const PrivacyOverlay: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-background/90 text-text-primary flex flex-col items-center justify-center p-6 backdrop-blur-md select-none">
+    <div className="fixed inset-0 z-[9999] bg-[#07080C]/98 text-text-primary flex flex-col items-center justify-center p-6 backdrop-blur-[64px] [-webkit-backdrop-filter:blur(64px)] select-none">
       <div className="max-w-md w-full bg-surface border border-border p-8 rounded-2xl shadow-2xl text-center flex flex-col items-center">
         <div className="w-14 h-14 rounded-xl bg-surface-elevated border border-border flex items-center justify-center mb-5 shadow-sm text-accent">
           {isLocked ? <Lock className="w-6 h-6" /> : <EyeOff className="w-6 h-6" />}

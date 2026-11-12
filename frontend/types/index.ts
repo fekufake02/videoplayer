@@ -77,7 +77,9 @@ export interface IDriveVideo {
   lastSyncedAt?: string;
   playCount?: number;
   favorite?: boolean;
+  tags?: string[];
   notes?: string;
+  customTitle?: boolean;
   createdAt: string;
   updatedAt: string;
 }

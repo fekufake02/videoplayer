@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { IVideo } from '../types';
 import { VideoCard } from './VideoCard';
 import {
@@ -8,6 +8,8 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Film,
   LayoutGrid,
   List,
@@ -56,6 +58,23 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isMultiSelectActive, setIsMultiSelectActive] = useState<boolean>(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pageInput, setPageInput] = useState<string>(page.toString());
+
+  useEffect(() => {
+    setPageInput(page.toString());
+  }, [page]);
+
+  const handlePageJumpSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseInt(pageInput.trim(), 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= totalPages) {
+      if (parsed !== page) {
+        onPageChange(parsed);
+      }
+    } else {
+      setPageInput(page.toString());
+    }
+  };
 
   const handleSelectToggle = (id: string) => {
     setSelectedIds((prev) =>
@@ -250,25 +269,60 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
         </div>
       )}
 
-      {/* Pagination Bar */}
+      {/* Pagination Bar with Direct Page Jump */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-4">
+        <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 pt-4">
+          <button
+            onClick={() => onPageChange(1)}
+            disabled={page <= 1}
+            className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 rounded-lg transition-colors cursor-pointer"
+            title="First Page"
+          >
+            <ChevronsLeft className="w-4 h-4" />
+          </button>
           <button
             onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
-            className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] disabled:opacity-40 text-slate-300 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 rounded-lg transition-colors cursor-pointer"
+            title="Previous Page"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="text-xs font-mono text-slate-400 px-2 tabular-nums">
-            Page {page} of {totalPages}
-          </span>
+
+          {/* Direct Page Input Form */}
+          <form
+            onSubmit={handlePageJumpSubmit}
+            className="flex items-center gap-1.5 bg-[#131620] border border-white/[0.07] px-2.5 py-1 rounded-lg text-xs font-mono text-slate-300"
+          >
+            <span className="text-slate-400">Page</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={pageInput}
+              onChange={(e) => setPageInput(e.target.value)}
+              onBlur={handlePageJumpSubmit}
+              className="w-10 text-center bg-[#090A0F] border border-white/[0.1] rounded px-1 py-0.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-400 tabular-nums"
+              title="Enter page number and press Enter"
+            />
+            <span className="text-slate-400">of {totalPages}</span>
+          </form>
+
           <button
             onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
-            className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] disabled:opacity-40 text-slate-300 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 rounded-lg transition-colors cursor-pointer"
+            title="Next Page"
           >
             <ChevronRight className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onPageChange(totalPages)}
+            disabled={page >= totalPages}
+            className="p-1.5 bg-[#131620] border border-white/[0.07] hover:bg-[#191D29] disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 rounded-lg transition-colors cursor-pointer"
+            title="Last Page"
+          >
+            <ChevronsRight className="w-4 h-4" />
           </button>
         </div>
       )}

@@ -519,6 +519,16 @@ class ApiClient {
     return this.request(`/drive/videos/${id}`, { method: 'GET' });
   }
 
+  async updateDriveVideoMetadata(
+    id: string,
+    payload: { title?: string; tags?: string[]; notes?: string; favorite?: boolean }
+  ): Promise<{ success: boolean; video: IDriveVideo }> {
+    return this.request(`/drive/videos/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async initiateDriveThumbnailUpload(payload: {
     filename?: string;
     mimeType?: string;

@@ -41,7 +41,7 @@ export type AnyMediaVideo = IVideo | IDriveVideo;
 export interface SharedVideoCardProps {
   video: AnyMediaVideo;
   sourceType: 'vault' | 'drive';
-  onEdit?: (video: IVideo) => void;
+  onEdit?: (video: any) => void;
   onDelete?: (video: AnyMediaVideo) => void;
   onFavoriteToggle?: (id: string, isFav: boolean) => void;
   isSelected?: boolean;
@@ -501,14 +501,14 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                     </a>
                   )}
 
-                  {!isDrive && onEdit && (
+                  {onEdit && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setShowMenu(false);
-                        onEdit(video as IVideo);
+                        onEdit(video);
                       }}
-                      className="w-full px-3 py-2 text-left hover:bg-white/[0.06] flex items-center gap-2.5"
+                      className="w-full px-3 py-2 text-left hover:bg-white/[0.06] flex items-center gap-2.5 cursor-pointer"
                     >
                       <Edit3 className="w-3.5 h-3.5 text-[#A1A6B5]" />
                       <span>Edit Details</span>

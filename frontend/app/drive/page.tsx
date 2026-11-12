@@ -7,22 +7,34 @@ import { api } from '../../lib/api';
 import { IDriveVideo } from '../../types';
 import { Navbar } from '../../components/Navbar';
 import { DriveVideoCard } from '../../components/DriveVideoCard';
-import { LibrarySidebar, LibraryNavSection } from '../../components/LibrarySidebar';
+import { EditMetadataModal } from '../../components/EditMetadataModal';
+import { LibrarySidebar } from '../../components/LibrarySidebar';
+import {
+  getDriveVideosCache,
+  setDriveVideosCache,
+  updateSingleDriveVideoInCache,
+} from '../../lib/driveState';
 import {
   RefreshCw,
-  Search,
   ArrowUpDown,
   AlertCircle,
   Cloud,
   Check,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 
 export default function DriveGalleryPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading } = useAuth();
 
-  const [videos, setVideos] = useState<IDriveVideo[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [videos, setVideos] = useState<IDriveVideo[]>(() => {
+    return getDriveVideosCache() || [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const cached = getDriveVideosCache();
+    return !cached || cached.length === 0;
+  });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [toastMsg, setToastMsg] = useState<string>('');
@@ -33,13 +45,34 @@ export default function DriveGalleryPage() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
+  // List vs Grid view mode
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('vault_drive_view_mode');
+      if (stored === 'list' || stored === 'grid') {
+        setViewMode(stored);
+      }
+    }
+  }, []);
+
+  const handleViewModeChange = (mode: 'grid' | 'list') => {
+    setViewMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('vault_drive_view_mode', mode);
+    }
+  };
+
+  // Edit Video Modal state
+  const [editingVideo, setEditingVideo] = useState<IDriveVideo | null>(null);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.push('/login');
     }
   }, [isLoading, isAuthenticated, router]);
 
-  // Debounce search query to prevent frequent re-fetching while typing
+  // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchQuery.trim());
@@ -47,44 +80,55 @@ export default function DriveGalleryPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const fetchDriveVideos = useCallback(async (isInitial = false) => {
-    if (isInitial) {
-      setLoading(true);
-    }
-    setErrorMsg('');
-    try {
-      const res = await api.listDriveVideos({
-        limit: 500,
-        search: debouncedSearch,
-        sort: sortBy,
-      });
-
-      if (res?.success) {
-        setVideos(res.videos || []);
-        // Only trigger auto-sync on initial load if library is completely empty and no search active
-        if ((!res.videos || res.videos.length === 0) && isInitial && !debouncedSearch) {
-          api.syncDriveFolder()
-            .then((syncRes) => {
-              if (syncRes?.videos && syncRes.videos.length > 0) {
-                setVideos(syncRes.videos);
-              }
-            })
-            .catch(() => {});
-        }
+  const fetchDriveVideos = useCallback(
+    async (showLoadingSpinner = false) => {
+      if (showLoadingSpinner) {
+        setLoading(true);
       }
-    } catch (err: any) {
-      console.error('Failed to fetch Drive videos:', err);
-      setErrorMsg(err.message || 'Could not load Google Drive videos.');
-    } finally {
-      setLoading(false);
-    }
-  }, [debouncedSearch, sortBy]);
+      setErrorMsg('');
+      try {
+        const res = await api.listDriveVideos({
+          limit: 500,
+          search: debouncedSearch,
+          sort: sortBy,
+        });
 
+        if (res?.success) {
+          const fetched = res.videos || [];
+          setVideos(fetched);
+          setDriveVideosCache(fetched);
+
+          // Only trigger auto-sync on initial load if library is completely empty and no search active
+          if (fetched.length === 0 && !debouncedSearch) {
+            api
+              .syncDriveFolder()
+              .then((syncRes) => {
+                if (syncRes?.videos && syncRes.videos.length > 0) {
+                  setVideos(syncRes.videos);
+                  setDriveVideosCache(syncRes.videos);
+                }
+              })
+              .catch(() => {});
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to fetch Drive videos:', err);
+        setErrorMsg(err.message || 'Could not load Google Drive videos.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [debouncedSearch, sortBy]
+  );
+
+  // Only trigger network request when search or sort changes, or if initial cache is empty
   useEffect(() => {
     if (isAuthenticated) {
-      fetchDriveVideos(videos.length === 0);
+      const cached = getDriveVideosCache();
+      const needsInitialFetch = !cached || cached.length === 0;
+      fetchDriveVideos(needsInitialFetch);
     }
-  }, [isAuthenticated, debouncedSearch, sortBy]);
+  }, [isAuthenticated, debouncedSearch, sortBy, fetchDriveVideos]);
 
   const handleSyncFolder = async () => {
     setIsSyncing(true);
@@ -92,15 +136,30 @@ export default function DriveGalleryPage() {
     try {
       const res = await api.syncDriveFolder();
       if (res?.success) {
-        setToastMsg(`Synced ${res.syncedCount || res.videos?.length || 0} videos from Google Drive.`);
+        const syncedList = res.videos || [];
+        setVideos(syncedList);
+        setDriveVideosCache(syncedList);
+        setToastMsg(`Synced ${res.syncedCount || syncedList.length} videos from Google Drive.`);
         setTimeout(() => setToastMsg(''), 4000);
-        await fetchDriveVideos();
       }
     } catch (err: any) {
       console.error('Failed to sync folder:', err);
       setErrorMsg(err.message || 'Failed to sync Google Drive folder.');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleSaveMetadataSuccess = (updated?: IDriveVideo) => {
+    if (updated) {
+      setVideos((prev) =>
+        prev.map((v) => (v._id === updated._id || v.driveFileId === updated.driveFileId ? updated : v))
+      );
+      updateSingleDriveVideoInCache(updated);
+      setToastMsg(`Updated "${updated.title}"`);
+      setTimeout(() => setToastMsg(''), 3000);
+    } else {
+      fetchDriveVideos(false);
     }
   };
 
@@ -126,6 +185,16 @@ export default function DriveGalleryPage() {
           <Check className="w-4 h-4 text-emerald-400" />
           <span>{toastMsg}</span>
         </div>
+      )}
+
+      {/* Edit Metadata Modal */}
+      {editingVideo && (
+        <EditMetadataModal
+          video={editingVideo}
+          isDrive={true}
+          onClose={() => setEditingVideo(null)}
+          onSuccess={handleSaveMetadataSuccess}
+        />
       )}
 
       <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
@@ -161,13 +230,41 @@ export default function DriveGalleryPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Grid / List View Mode Toggle */}
+              <div className="flex items-center bg-[#131620] border border-white/[0.07] rounded-lg p-0.5">
+                <button
+                  onClick={() => handleViewModeChange('grid')}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    viewMode === 'grid'
+                      ? 'bg-[#191D29] text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Grid view"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => handleViewModeChange('list')}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    viewMode === 'list'
+                      ? 'bg-[#191D29] text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="List view"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               {/* Sync Button */}
               <button
                 onClick={handleSyncFolder}
                 disabled={isSyncing}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-[#131620] hover:bg-[#191D29] border border-white/[0.07] text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-indigo-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                <RefreshCw
+                  className={`w-3.5 h-3.5 text-indigo-400 ${isSyncing ? 'animate-spin' : ''}`}
+                />
                 <span>{isSyncing ? 'Syncing...' : 'Sync Folder'}</span>
               </button>
 
@@ -179,11 +276,21 @@ export default function DriveGalleryPage() {
                   onChange={(e) => setSortBy(e.target.value)}
                   className="bg-transparent text-slate-200 outline-none cursor-pointer pr-1"
                 >
-                  <option value="recentlyAdded" className="bg-[#131620] text-slate-200">Recently Added</option>
-                  <option value="nameAsc" className="bg-[#131620] text-slate-200">Name A-Z</option>
-                  <option value="nameDesc" className="bg-[#131620] text-slate-200">Name Z-A</option>
-                  <option value="duration" className="bg-[#131620] text-slate-200">Longest Duration</option>
-                  <option value="size" className="bg-[#131620] text-slate-200">File Size</option>
+                  <option value="recentlyAdded" className="bg-[#131620] text-slate-200">
+                    Recently Added
+                  </option>
+                  <option value="nameAsc" className="bg-[#131620] text-slate-200">
+                    Name A-Z
+                  </option>
+                  <option value="nameDesc" className="bg-[#131620] text-slate-200">
+                    Name Z-A
+                  </option>
+                  <option value="duration" className="bg-[#131620] text-slate-200">
+                    Longest Duration
+                  </option>
+                  <option value="size" className="bg-[#131620] text-slate-200">
+                    File Size
+                  </option>
                 </select>
               </div>
             </div>
@@ -197,7 +304,7 @@ export default function DriveGalleryPage() {
             </div>
           )}
 
-          {/* Videos Grid */}
+          {/* Videos Container */}
           {loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 animate-pulse">
               {[...Array(8)].map((_, i) => (
@@ -222,16 +329,36 @@ export default function DriveGalleryPage() {
                 <span>Sync Now</span>
               </button>
             </div>
+          ) : viewMode === 'list' ? (
+            <div className="space-y-3">
+              {videos.map((video) => (
+                <DriveVideoCard
+                  key={video._id}
+                  video={video}
+                  viewMode="list"
+                  onEdit={(v) => setEditingVideo(v)}
+                  onFavoriteToggle={(id, isFav) => {
+                    setVideos((prev) =>
+                      prev.map((v) => (v._id === id ? { ...v, favorite: isFav } : v))
+                    );
+                    updateSingleDriveVideoInCache({ ...video, favorite: isFav });
+                  }}
+                />
+              ))}
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
               {videos.map((video) => (
                 <DriveVideoCard
                   key={video._id}
                   video={video}
+                  viewMode="grid"
+                  onEdit={(v) => setEditingVideo(v)}
                   onFavoriteToggle={(id, isFav) => {
                     setVideos((prev) =>
                       prev.map((v) => (v._id === id ? { ...v, favorite: isFav } : v))
                     );
+                    updateSingleDriveVideoInCache({ ...video, favorite: isFav });
                   }}
                 />
               ))}

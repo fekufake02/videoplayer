@@ -1,20 +1,23 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { IVideo } from '../types';
+import { IVideo, IDriveVideo } from '../types';
 import { api } from '../lib/api';
+import { updateSingleDriveVideoInCache } from '../lib/driveState';
 import { Edit3, X, Tag } from 'lucide-react';
 
 interface EditMetadataModalProps {
-  video: IVideo | null;
+  video: IVideo | IDriveVideo | null;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (updated?: any) => void;
+  isDrive?: boolean;
 }
 
 export const EditMetadataModal: React.FC<EditMetadataModalProps> = ({
   video,
   onClose,
   onSuccess,
+  isDrive,
 }) => {
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState('');
@@ -36,12 +39,25 @@ export const EditMetadataModal: React.FC<EditMetadataModalProps> = ({
     setIsSaving(true);
     try {
       const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean);
-      await api.updateVideoMetadata(video._id, {
-        title: title.trim(),
-        tags: tagList,
-        notes: notes.trim(),
-      });
-      onSuccess();
+      const isDriveVideo = isDrive || 'driveFileId' in (video as any);
+      if (isDriveVideo) {
+        const res = await api.updateDriveVideoMetadata(video._id, {
+          title: title.trim(),
+          tags: tagList,
+          notes: notes.trim(),
+        });
+        if (res?.video) {
+          updateSingleDriveVideoInCache(res.video);
+        }
+        onSuccess(res?.video);
+      } else {
+        await api.updateVideoMetadata(video._id, {
+          title: title.trim(),
+          tags: tagList,
+          notes: notes.trim(),
+        });
+        onSuccess();
+      }
       onClose();
     } catch (err) {
       console.error('Failed to update video metadata:', err);

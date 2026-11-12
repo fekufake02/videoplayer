@@ -256,6 +256,8 @@ interface IDriveVideoItem {
   playCount?: number;
   favorite?: boolean;
   notes?: string;
+  tags?: string[];
+  customTitle?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -420,7 +422,9 @@ async function initialDriveFolderSync() {
           const highRes = rawThumb.includes('=s190') ? rawThumb.replace('=s190', '=s1280') : rawThumb;
           let existing = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === fileId);
           if (existing) {
-            existing.title = existing.title || rawTitle.replace(/\.[^/.]+$/, '');
+            if (!existing.customTitle) {
+              existing.title = rawTitle.replace(/\.[^/.]+$/, '');
+            }
             existing.originalFilename = existing.originalFilename || rawTitle;
             existing.folderId = folderId;
           } else {
@@ -431,7 +435,7 @@ async function initialDriveFolderSync() {
               title: rawTitle.replace(/\.[^/.]+$/, ''),
               originalFilename: rawTitle,
               mimeType: 'video/mp4',
-              size: 1024 * 1024 * 50,
+              size: 0,
               thumbnailUrl: highRes,
               driveViewUrl: `https://drive.google.com/file/d/${fileId}/view`,
               driveStreamUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
@@ -1343,6 +1347,23 @@ export async function GET(
       const contentLength = upstreamResp.headers.get('content-length');
       if (contentLength) respHeaders.set('Content-Length', contentLength);
 
+      // Learn and persist real size if video had default or 0 size
+      if (video && (!video.size || video.size === 1024 * 1024 * 50 || video.size === 0)) {
+        let learnedSize = 0;
+        if (contentRange) {
+          const slashParts = contentRange.split('/');
+          if (slashParts[1] && !isNaN(parseInt(slashParts[1], 10))) {
+            learnedSize = parseInt(slashParts[1], 10);
+          }
+        } else if (contentLength && !isNaN(parseInt(contentLength, 10)) && !rangeHeader) {
+          learnedSize = parseInt(contentLength, 10);
+        }
+        if (learnedSize > 0) {
+          video.size = learnedSize;
+          saveDriveVideosToDisk();
+        }
+      }
+
       return new NextResponse(upstreamResp.body, {
         status: upstreamResp.status === 200 && rangeHeader ? 206 : upstreamResp.status,
         headers: respHeaders,
@@ -1819,7 +1840,9 @@ export async function POST(
         for (const f of fetchedFiles) {
           let existing = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === f.id);
           if (existing) {
-            existing.title = existing.title || f.title;
+            if (!existing.customTitle) {
+              existing.title = f.title;
+            }
             existing.originalFilename = existing.originalFilename || f.filename;
             existing.folderId = folderId;
             existing.lastSyncedAt = new Date().toISOString();
@@ -1832,7 +1855,7 @@ export async function POST(
               title: f.title,
               originalFilename: f.filename,
               mimeType: f.mimeType,
-              size: 1024 * 1024 * 50,
+              size: (f as any).size || 0,
               thumbnailUrl: f.thumbUrl || `https://drive.google.com/thumbnail?id=${f.id}&sz=w1280`,
               driveViewUrl: `https://drive.google.com/file/d/${f.id}/view`,
               driveStreamUrl: `https://drive.google.com/uc?export=download&id=${f.id}`,
@@ -2036,6 +2059,37 @@ export async function PATCH(
     if (body.favorite !== undefined) video.favorite = body.favorite;
     video.updatedAt = new Date().toISOString();
     saveVideosToDisk();
+
+    return NextResponse.json({
+      success: true,
+      video,
+    });
+  }
+
+  // 4. Update Drive Video Metadata: /api/drive/videos/:id
+  if (slug.length === 3 && slug[0] === 'drive' && slug[1] === 'videos') {
+    const videoId = slug[2];
+    let video = globalDriveVideos.get(videoId);
+    if (!video) {
+      video = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === videoId);
+    }
+    if (!video) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Drive video not found' } },
+        { status: 404 }
+      );
+    }
+
+    const body = await req.json();
+    if (body.title !== undefined) {
+      video.title = body.title;
+      video.customTitle = true;
+    }
+    if (body.tags !== undefined) video.tags = body.tags;
+    if (body.notes !== undefined) video.notes = body.notes;
+    if (body.favorite !== undefined) video.favorite = body.favorite;
+    video.updatedAt = new Date().toISOString();
+    saveDriveVideosToDisk();
 
     return NextResponse.json({
       success: true,

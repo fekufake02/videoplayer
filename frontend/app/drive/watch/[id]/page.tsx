@@ -32,12 +32,17 @@ import {
   Cloud,
   Layers,
   Settings as SettingsIcon,
+  Upload,
+  Sparkles,
 } from 'lucide-react';
 import { useBufferedSegments } from '../../../../hooks/useBufferedSegments';
 import { BufferingIndicator } from '../../../../components/BufferingIndicator';
 import { usePip } from '../../../../context/PipContext';
 import { getCachedContactSheet, generateContactSheet } from '../../../../lib/contactSheetGenerator';
 import { PlayerSettingsMenu, AspectRatioOption, AudioPreset } from '../../../../components/PlayerSettingsMenu';
+import { updateSingleDriveVideoInCache } from '../../../../lib/driveState';
+import { SharedVideoCard } from '../../../../components/SharedVideoCard';
+import { IVideo } from '../../../../types';
 import {
   saveDrivePlaybackProgress,
   getDrivePlaybackProgress,
@@ -55,6 +60,7 @@ export default function DriveWatchPage() {
 
   const [video, setVideo] = useState<IDriveVideo | null>(null);
   const [allVideos, setAllVideos] = useState<IDriveVideo[]>([]);
+  const [suggestedVideos, setSuggestedVideos] = useState<Array<{ video: any; source: 'drive' | 'vault' }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -98,6 +104,7 @@ export default function DriveWatchPage() {
   const [snapSuccess, setSnapSuccess] = useState('');
   const [snapError, setSnapError] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
+  const thumbnailFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { bufferedRanges, percentBuffered } = useBufferedSegments(videoRef as any);
@@ -188,21 +195,22 @@ export default function DriveWatchPage() {
     };
   }, [showControls, isPlaying]);
 
-  // Load video details
+  // Load video details and 8 blended suggestions from Drive + B2 Vault
   const loadData = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError('');
     try {
-      const [detailsRes, listRes] = await Promise.all([
+      const [detailsRes, listRes, vaultListRes] = await Promise.all([
         api.getDriveVideoDetails(id).catch(() => null),
         api.listDriveVideos({ limit: 500 }).catch(() => null),
+        api.listVideos({ limit: 40 }).catch(() => null),
       ]);
 
       if (detailsRes?.success && detailsRes.video) {
         setVideo(detailsRes.video);
       } else if (listRes?.success && listRes.videos) {
-        const found = listRes.videos.find((v) => v._id === id || v.driveFileId === id);
+        const found = listRes.videos.find((v: IDriveVideo) => v._id === id || v.driveFileId === id);
         if (found) {
           setVideo(found);
         } else {
@@ -215,6 +223,22 @@ export default function DriveWatchPage() {
       if (listRes?.success && listRes.videos) {
         setAllVideos(listRes.videos);
       }
+
+      // Generate 8 random suggested videos from both Google Drive and B2 Vault
+      const drivePool: Array<{ video: any; source: 'drive' | 'vault' }> = (listRes?.videos || [])
+        .filter((v: IDriveVideo) => v._id !== id && v.driveFileId !== id)
+        .map((v: IDriveVideo) => ({ video: v, source: 'drive' as const }));
+
+      const vaultPool: Array<{ video: any; source: 'drive' | 'vault' }> = (vaultListRes?.videos || [])
+        .map((v: IVideo) => ({ video: v, source: 'vault' as const }));
+
+      const combinedPool = [...drivePool, ...vaultPool];
+      // Randomly shuffle combined items
+      for (let i = combinedPool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [combinedPool[i], combinedPool[j]] = [combinedPool[j], combinedPool[i]];
+      }
+      setSuggestedVideos(combinedPool.slice(0, 8));
     } catch (err: any) {
       console.error('Failed to load drive video:', err);
       setError(err?.message || 'Failed to load video.');
@@ -439,25 +463,64 @@ export default function DriveWatchPage() {
     });
   };
 
-  // Frame Capture / Thumbnail Sync
+  // Frame Capture / Thumbnail Sync (works in both native and embed modes)
   const handleCaptureThumbnail = async (targetTimestamp?: number) => {
     if (!video || isSnapping) return;
-    const vidEl = videoRef.current;
-    if (!vidEl) return;
 
     setIsSnapping(true);
     setSnapSuccess('');
     setSnapError('');
 
+    let offscreenVideo: HTMLVideoElement | null = null;
     try {
-      if (typeof targetTimestamp === 'number' && !isNaN(targetTimestamp) && targetTimestamp >= 0) {
-        vidEl.currentTime = targetTimestamp;
+      let vidEl = videoRef.current;
+      const effectiveTime =
+        typeof targetTimestamp === 'number'
+          ? targetTimestamp
+          : vidEl && !isNaN(vidEl.currentTime) && vidEl.currentTime > 0
+          ? vidEl.currentTime
+          : thumbnailTimestamp || currentTime || 5;
+
+      // In Google Drive preview/embed mode or when native video element is not ready,
+      // instantiate an offscreen video element using chunk-stream to seek and snap
+      if (!vidEl || activePlayer === 'embed') {
+        offscreenVideo = document.createElement('video');
+        offscreenVideo.crossOrigin = 'anonymous';
+        offscreenVideo.muted = true;
+        offscreenVideo.preload = 'auto';
+        offscreenVideo.src = `/api/drive/videos/${video.driveFileId}/chunk-stream`;
+
         await new Promise<void>((resolve) => {
-          const onSeeked = () => {
-            vidEl.removeEventListener('seeked', onSeeked);
+          const timeout = setTimeout(resolve, 8000);
+          offscreenVideo!.onloadedmetadata = () => {
+            clearTimeout(timeout);
             resolve();
           };
-          vidEl.addEventListener('seeked', onSeeked);
+          offscreenVideo!.onerror = () => {
+            clearTimeout(timeout);
+            resolve();
+          };
+        });
+
+        offscreenVideo.currentTime = effectiveTime;
+        await new Promise<void>((resolve) => {
+          const seekTimeout = setTimeout(resolve, 3500);
+          offscreenVideo!.onseeked = () => {
+            clearTimeout(seekTimeout);
+            resolve();
+          };
+        });
+
+        vidEl = offscreenVideo;
+      } else if (vidEl && typeof targetTimestamp === 'number' && !isNaN(targetTimestamp) && targetTimestamp >= 0) {
+        const seekEl = vidEl;
+        seekEl.currentTime = targetTimestamp;
+        await new Promise<void>((resolve) => {
+          const onSeeked = () => {
+            seekEl.removeEventListener('seeked', onSeeked);
+            resolve();
+          };
+          seekEl.addEventListener('seeked', onSeeked);
           setTimeout(resolve, 1500);
         });
       }
@@ -467,6 +530,7 @@ export default function DriveWatchPage() {
       canvas.height = 270;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Could not create canvas context');
+      if (!vidEl) throw new Error('Video element not ready for frame capture');
 
       ctx.drawImage(vidEl, 0, 0, 480, 270);
 
@@ -477,7 +541,7 @@ export default function DriveWatchPage() {
             else reject(new Error('Canvas conversion failed'));
           },
           'image/webp',
-          0.78
+          0.82
         );
       });
 
@@ -509,14 +573,61 @@ export default function DriveWatchPage() {
       });
 
       if (completeRes?.success && completeRes.thumbnailUrl) {
-        setVideo((prev) => (prev ? { ...prev, thumbnailUrl: completeRes.thumbnailUrl } : null));
-        setSnapSuccess(`Thumbnail updated at ${formatTime(vidEl.currentTime)}!`);
-        setTimeout(() => setSnapSuccess(''), 4000);
+        const updated = { ...video, thumbnailUrl: completeRes.thumbnailUrl };
+        setVideo(updated);
+        updateSingleDriveVideoInCache(updated);
+        setSnapSuccess(`Thumbnail captured at ${formatTime(effectiveTime)}!`);
+        setTimeout(() => setSnapSuccess(''), 4500);
       }
     } catch (err: any) {
       console.error('Frame capture error:', err);
-      setSnapError(err.message || 'Error capturing frame.');
-      setTimeout(() => setSnapError(''), 4000);
+      setSnapError(err.message || 'Error capturing frame. Try custom upload below.');
+      setTimeout(() => setSnapError(''), 5000);
+    } finally {
+      if (offscreenVideo) {
+        offscreenVideo.src = '';
+        offscreenVideo.remove();
+      }
+      setIsSnapping(false);
+    }
+  };
+
+  const handleUploadCustomThumbnail = async (file: File) => {
+    if (!video || !file) return;
+    setIsSnapping(true);
+    setSnapSuccess('');
+    setSnapError('');
+    try {
+      const initRes = await api.initiateDriveThumbnailUpload({
+        driveFileId: video.driveFileId,
+        filename: `${video.originalFilename.replace(/\.[^/.]+$/, '')}_custom.webp`,
+        mimeType: file.type || 'image/webp',
+      });
+      if (!initRes?.success || !initRes.uploadUrl || !initRes.storageKey) {
+        throw new Error('Failed to initiate thumbnail upload.');
+      }
+      const upRes = await fetch(initRes.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'image/webp' },
+        body: file,
+      });
+      if (!upRes.ok) throw new Error('Direct upload to storage failed.');
+      const completeRes = await api.completeDriveThumbnailUpload({
+        id: video._id,
+        driveFileId: video.driveFileId,
+        storageKey: initRes.storageKey,
+        storageAccount: initRes.storageAccount,
+      });
+      if (completeRes?.success && completeRes.thumbnailUrl) {
+        const updated = { ...video, thumbnailUrl: completeRes.thumbnailUrl };
+        setVideo(updated);
+        updateSingleDriveVideoInCache(updated);
+        setSnapSuccess('Custom thumbnail uploaded!');
+        setTimeout(() => setSnapSuccess(''), 4500);
+      }
+    } catch (err: any) {
+      setSnapError(err.message || 'Error uploading custom thumbnail.');
+      setTimeout(() => setSnapError(''), 5000);
     } finally {
       setIsSnapping(false);
     }
@@ -613,15 +724,16 @@ export default function DriveWatchPage() {
       )}
 
       <main className="flex-1 max-w-[1500px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
-        {/* Top Header Row */}
+        {/* Top Header Row with Prefetched Fast Return */}
         <div className="flex items-center justify-between gap-3">
-          <button
-            onClick={() => router.push('/drive')}
+          <Link
+            href="/drive"
+            prefetch
             className="inline-flex items-center gap-2 text-xs font-semibold text-slate-300 hover:text-white bg-[#131620] hover:bg-[#191D29] border border-white/[0.07] px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to Drive Videos</span>
-          </button>
+            <span>Back to Drive Media</span>
+          </Link>
 
           {/* Intelligent Player Source Selector */}
           <div className="relative">
@@ -959,19 +1071,40 @@ export default function DriveWatchPage() {
                 </div>
               )}
 
-              {/* Snap Frame Thumbnail Sync */}
-              {activePlayer === 'native' && (
-                <button
-                  type="button"
-                  disabled={isSnapping}
-                  onClick={() => handleCaptureThumbnail()}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-[#191D29] hover:bg-white/[0.08] border border-white/[0.07] text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
-                  title="Snap current frame as thumbnail"
-                >
-                  <Camera className={`w-3.5 h-3.5 text-indigo-400 ${isSnapping ? 'animate-pulse' : ''}`} />
-                  <span>{isSnapping ? 'Capturing...' : 'Snap Frame'}</span>
-                </button>
-              )}
+              {/* Snap Frame Thumbnail Sync (Available in both Native and Embed modes) */}
+              <button
+                type="button"
+                disabled={isSnapping}
+                onClick={() => handleCaptureThumbnail()}
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#191D29] hover:bg-white/[0.08] border border-white/[0.07] text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                title="Snap frame as thumbnail (works with both Native and Drive Preview)"
+              >
+                <Camera className={`w-3.5 h-3.5 text-indigo-400 ${isSnapping ? 'animate-pulse' : ''}`} />
+                <span>{isSnapping ? 'Capturing...' : 'Snap Frame'}</span>
+              </button>
+
+              {/* Upload Custom Thumbnail Button & Hidden File Input */}
+              <input
+                ref={thumbnailFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadCustomThumbnail(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                disabled={isSnapping}
+                onClick={() => thumbnailFileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#191D29] hover:bg-white/[0.08] border border-white/[0.07] text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                title="Upload custom image file as thumbnail"
+              >
+                <Upload className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden sm:inline">Upload Thumb</span>
+              </button>
 
               {/* Download */}
               <button
@@ -997,16 +1130,25 @@ export default function DriveWatchPage() {
           </div>
         </div>
 
-        {/* Up Next / Sibling Videos Shelf */}
-        {siblingVideos.length > 0 && (
+        {/* Up Next / 8 Random Suggested Videos Shelf (Drive + Vault) */}
+        {suggestedVideos.length > 0 && (
           <section className="space-y-3 pt-2">
-            <h3 className="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
-              <Cloud className="w-4 h-4 text-indigo-400" />
-              <span>More from Google Drive</span>
+            <h3 className="text-sm font-semibold text-white tracking-tight flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-400" />
+                <span>Recommended Videos</span>
+              </span>
+              <span className="text-[11px] font-mono text-slate-500">
+                8 suggestions from Drive & Vault
+              </span>
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {siblingVideos.map((sibling) => (
-                <DriveVideoCard key={sibling._id} video={sibling} />
+              {suggestedVideos.map((item) => (
+                <SharedVideoCard
+                  key={`${item.source}-${item.video._id}`}
+                  video={item.video}
+                  sourceType={item.source}
+                />
               ))}
             </div>
           </section>

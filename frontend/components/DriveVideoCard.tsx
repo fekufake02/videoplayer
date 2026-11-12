@@ -13,6 +13,7 @@ export interface DriveVideoCardProps {
   viewMode?: 'grid' | 'list';
   onDelete?: (video: IDriveVideo) => void;
   onOpenDetails?: (video: IDriveVideo) => void;
+  onEdit?: (video: IDriveVideo) => void;
 }
 
 export const DriveVideoCard: React.FC<DriveVideoCardProps> = ({
@@ -24,6 +25,7 @@ export const DriveVideoCard: React.FC<DriveVideoCardProps> = ({
   viewMode = 'grid',
   onDelete,
   onOpenDetails,
+  onEdit,
 }) => {
   return (
     <SharedVideoCard
@@ -36,6 +38,7 @@ export const DriveVideoCard: React.FC<DriveVideoCardProps> = ({
       viewMode={viewMode}
       onDelete={onDelete as any}
       onOpenDetails={onOpenDetails as any}
+      onEdit={onEdit as any}
     />
   );
 };
