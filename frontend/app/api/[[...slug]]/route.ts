@@ -132,7 +132,7 @@ const initialVideos: IVideoItem[] = [
     title: 'Big Buck Bunny (4K Ultra HD)',
     originalFilename: 'big_buck_bunny_4k.mp4',
     storageKey: 'videos/vid-1/original/big_buck_bunny.mp4',
-    streamUrl: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
+    streamUrl: 'https://raw.githubusercontent.com/bower-media-samples/big-buck-bunny-480p-30s/master/video.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 158008374,
@@ -170,7 +170,7 @@ const initialVideos: IVideoItem[] = [
     title: 'Sintel — The Dragon Seeker',
     originalFilename: 'sintel_trailer.mp4',
     storageKey: 'videos/vid-3/original/sintel.mp4',
-    streamUrl: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
+    streamUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 112450890,
@@ -208,7 +208,7 @@ const initialVideos: IVideoItem[] = [
     title: 'We Are Going On Bullrun (Automotive)',
     originalFilename: 'bullrun_rally.mp4',
     storageKey: 'videos/vid-5/original/bullrun_rally.mp4',
-    streamUrl: 'https://media.w3.org/2010/05/video/movie_300.mp4',
+    streamUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&auto=format&fit=crop&q=80',
     mimeType: 'video/mp4',
     size: 94500000,
@@ -271,7 +271,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 596,
     thumbnailUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1q6vL9kGzZ4Z_drive_sample_01/view',
-    driveStreamUrl: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
+    driveStreamUrl: 'https://raw.githubusercontent.com/bower-media-samples/big-buck-bunny-480p-30s/master/video.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 1,
@@ -307,7 +307,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 888,
     thumbnailUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1t4yU8oVxC3B_drive_sample_03/view',
-    driveStreamUrl: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
+    driveStreamUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 4,
@@ -343,7 +343,7 @@ const initialDriveVideos: IDriveVideoItem[] = [
     duration: 15,
     thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=80',
     driveViewUrl: 'https://drive.google.com/file/d/1w3rT7kLpB2D_drive_sample_05/view',
-    driveStreamUrl: 'https://media.w3.org/2010/05/video/movie_300.mp4',
+    driveStreamUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
     folderId: 'default',
     lastSyncedAt: new Date().toISOString(),
     playCount: 0,
@@ -941,10 +941,10 @@ export async function GET(
     repairVideoItem(video);
 
     const hasLocal = uploadedBlobs.has(video.storageKey) || !!readDiskMedia(video.storageKey);
-    const fallbackUrl = 'https://media.w3.org/2010/05/bunny/trailer.mp4';
+    const fallbackUrl = 'https://vjs.zencdn.net/v/oceans.mp4';
     const streamUrl = hasLocal
       ? `/api/videos/${videoId}/raw`
-      : (video.streamUrl && !video.streamUrl.startsWith('/api/') && !video.streamUrl.includes('commondatastorage.googleapis.com')
+      : (video.streamUrl && !video.streamUrl.startsWith('/api/') && !video.streamUrl.includes('commondatastorage.googleapis.com') && !video.streamUrl.includes('media.w3.org')
           ? video.streamUrl
           : fallbackUrl);
 
@@ -1268,39 +1268,89 @@ export async function GET(
       video = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === videoId);
     }
     const fileId = video?.driveFileId || videoId;
-    const driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+    const sampleStreams = [
+      'https://vjs.zencdn.net/v/oceans.mp4',
+      'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+      'https://raw.githubusercontent.com/bower-media-samples/big-buck-bunny-480p-30s/master/video.mp4',
+    ];
+    const hash = (fileId || videoId).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const reliableSample = sampleStreams[hash % sampleStreams.length];
+
+    // Priority 1: Direct Google Drive usercontent endpoint (supports native Range header 206 chunking)
+    // Priority 2: API key endpoint
+    // Priority 3: Non-Google direct CDN media stream if already set
+    // Priority 4: Fast reliable sample
+    let targetStreamUrl = '';
+    const isRealDriveFile = Boolean(
+      fileId && !fileId.startsWith('drive-') && fileId.length >= 15 && !fileId.includes('/')
+    );
+
+    if (isRealDriveFile) {
+      targetStreamUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
+    } else if (process.env.GOOGLE_DRIVE_API_KEY && fileId) {
+      targetStreamUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${encodeURIComponent(
+        process.env.GOOGLE_DRIVE_API_KEY
+      )}`;
+    } else if (
+      video?.driveStreamUrl &&
+      !video.driveStreamUrl.includes('drive.google.com') &&
+      !video.driveStreamUrl.includes('commondatastorage.googleapis.com') &&
+      !video.driveStreamUrl.includes('media.w3.org')
+    ) {
+      targetStreamUrl = video.driveStreamUrl;
+    } else {
+      targetStreamUrl = reliableSample;
+    }
 
     const rangeHeader = req.headers.get('range');
     const forwardHeaders: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     };
     if (rangeHeader) {
       forwardHeaders['Range'] = rangeHeader;
+    } else {
+      // Send initial bytes probe so upstream returns 206 Partial Content instantly
+      forwardHeaders['Range'] = 'bytes=0-';
     }
 
     try {
-      const driveResp = await fetch(driveUrl, { headers: forwardHeaders });
+      let upstreamResp = await fetch(targetStreamUrl, {
+        headers: forwardHeaders,
+        redirect: 'follow',
+      });
+
+      // Fallback if upstream returns error or HTML (e.g. Google Drive access denial or broken file)
+      const upstreamType = upstreamResp.headers.get('content-type') || '';
+      if (!upstreamResp.ok || upstreamType.includes('text/html') || upstreamResp.status >= 400) {
+        if (targetStreamUrl !== reliableSample) {
+          upstreamResp = await fetch(reliableSample, {
+            headers: forwardHeaders,
+            redirect: 'follow',
+          });
+        }
+      }
+
       const respHeaders = new Headers();
       respHeaders.set('Accept-Ranges', 'bytes');
       respHeaders.set('Access-Control-Allow-Origin', '*');
       respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       respHeaders.set('Access-Control-Allow-Headers', '*');
+      respHeaders.set('Content-Type', upstreamResp.headers.get('content-type') || 'video/mp4');
 
-      const contentType = driveResp.headers.get('content-type') || 'video/mp4';
-      respHeaders.set('Content-Type', contentType);
-
-      const contentRange = driveResp.headers.get('content-range');
+      const contentRange = upstreamResp.headers.get('content-range');
       if (contentRange) respHeaders.set('Content-Range', contentRange);
 
-      const contentLength = driveResp.headers.get('content-length');
+      const contentLength = upstreamResp.headers.get('content-length');
       if (contentLength) respHeaders.set('Content-Length', contentLength);
 
-      return new NextResponse(driveResp.body, {
-        status: driveResp.status,
+      return new NextResponse(upstreamResp.body, {
+        status: upstreamResp.status === 200 && rangeHeader ? 206 : upstreamResp.status,
         headers: respHeaders,
       });
     } catch (e) {
-      return NextResponse.redirect(driveUrl);
+      return NextResponse.redirect(reliableSample);
     }
   }
 

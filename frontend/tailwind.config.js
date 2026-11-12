@@ -10,11 +10,14 @@ module.exports = {
     extend: {
       colors: {
         background: 'var(--background)',
+        sidebar: 'var(--sidebar)',
         'background-secondary': 'var(--background-secondary)',
         surface: 'var(--surface)',
+        'surface-2': 'var(--surface-2)',
         'surface-elevated': 'var(--surface-elevated)',
         'surface-hover': 'var(--surface-hover)',
         border: 'var(--border)',
+        'border-strong': 'var(--border-strong)',
         'border-hover': 'var(--border-hover)',
         'text-primary': 'var(--text-primary)',
         'text-secondary': 'var(--text-secondary)',
@@ -30,8 +33,11 @@ module.exports = {
       },
       borderRadius: {
         control: '8px',
-        card: '12px',
-        modal: '16px',
+        btn: '10px',
+        card: '14px',
+        'card-lg': '16px',
+        modal: '20px',
+        sheet: '22px',
         drawer: '18px',
       },
       fontFamily: {

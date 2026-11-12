@@ -139,6 +139,9 @@ export default function DriveGalleryPage() {
           onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
           isMobileDrawerOpen={isMobileDrawerOpen}
           onCloseMobileDrawer={() => setIsMobileDrawerOpen(false)}
+          counts={{
+            drive: videos.length,
+          }}
         />
 
         {/* Main Content Area */}

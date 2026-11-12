@@ -36,18 +36,48 @@ import {
   Rotate3d,
   Settings as SettingsIcon,
   Sliders,
+  SkipBack,
+  SkipForward,
+  Bookmark as BookmarkIcon,
+  Repeat,
+  Clock,
 } from 'lucide-react';
 import { usePip } from '../context/PipContext';
 import { getCachedContactSheet, generateContactSheet } from '../lib/contactSheetGenerator';
-import { PlayerSettingsMenu, AspectRatioOption, AudioPreset } from './PlayerSettingsMenu';
+import { PlayerSettingsMenu, AspectRatioOption, AudioPreset, AbRepeatState } from './PlayerSettingsMenu';
+import {
+  createAudioGraph,
+  applyDspPreset,
+  buildDemoVttSubtitle,
+  PlayerAudioGraph,
+} from '../lib/audioDsp';
+import {
+  getStoredBookmarks,
+  addBookmark,
+  deleteBookmark,
+  getVideoChapters,
+  getNextVideoInQueue,
+  getPrevVideoInQueue,
+  formatTimestamp,
+} from '../lib/collectionsManager';
+import { IBookmark, IChapter } from '../types';
 import Link from 'next/link';
 
 interface VideoPlayerProps {
   video: IVideo;
   streamUrl: string;
+  queue?: IVideo[];
+  onNavigateNext?: () => void;
+  onNavigatePrev?: () => void;
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) => {
+export const VideoPlayer: React.FC<VideoPlayerProps> = ({
+  video,
+  streamUrl,
+  queue,
+  onNavigateNext,
+  onNavigatePrev,
+}) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -118,20 +148,170 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
   const [autoPlayNext, setAutoPlayNext] = useState<boolean>(true);
   const [isLooping, setIsLooping] = useState<boolean>(false);
   const [audioPreset, setAudioPreset] = useState<AudioPreset>('normal');
-  const [sleepTimer, setSleepTimer] = useState<number | null>(null);
+  const [sleepTimer, setSleepTimer] = useState<number | 'end' | null>(null);
+  const [sleepTimerRemainingSec, setSleepTimerRemainingSec] = useState<number | null>(null);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(false);
+  const [vttSubUrl, setVttSubUrl] = useState<string>('');
+
+  // Queue navigation
+  const nextVideo = queue && onNavigateNext ? getNextVideoInQueue(video._id, queue) : null;
+  const prevVideo = queue && onNavigatePrev ? getPrevVideoInQueue(video._id, queue) : null;
+  const [showAutoplayOverlay, setShowAutoplayOverlay] = useState(false);
+  const [autoplayCountdown, setAutoplayCountdown] = useState(5);
+
+  // Bookmarks & Chapters
+  const [bookmarks, setBookmarks] = useState<IBookmark[]>([]);
+  const [chapters, setChapters] = useState<IChapter[]>([]);
 
   useEffect(() => {
-    if (!sleepTimer || sleepTimer <= 0) return;
-    const timer = setTimeout(() => {
-      if (videoRef.current) {
-        videoRef.current.pause();
-        setIsPlaying(false);
+    if (video._id) {
+      setBookmarks(getStoredBookmarks(video._id));
+      const handleUpdate = () => {
+        setBookmarks(getStoredBookmarks(video._id));
+      };
+      window.addEventListener('vault:bookmarks-updated', handleUpdate);
+      return () => window.removeEventListener('vault:bookmarks-updated', handleUpdate);
+    }
+  }, [video._id]);
+
+  useEffect(() => {
+    if (video._id && duration > 0) {
+      setChapters(getVideoChapters(video._id, duration));
+    }
+  }, [video._id, duration]);
+
+  const handleAddBookmark = () => {
+    if (!video._id) return;
+    const cur = videoRef.current?.currentTime || currentTime;
+    addBookmark(video._id, cur);
+  };
+
+  const handleDeleteBookmark = (bmId: string) => {
+    deleteBookmark(bmId);
+  };
+
+  const handleJumpToBookmark = (sec: number) => {
+    handleDirectSeek(sec);
+  };
+
+  const handleJumpToChapter = (sec: number) => {
+    handleDirectSeek(sec);
+  };
+
+  // A-B Repeat Loop State
+  const [abRepeat, setAbRepeat] = useState<AbRepeatState>({
+    pointA: null,
+    pointB: null,
+    active: false,
+  });
+
+  const handleSetPointA = () => {
+    const cur = videoRef.current?.currentTime || currentTime;
+    const curSec = Math.floor(cur);
+    setAbRepeat((prev) => ({
+      ...prev,
+      pointA: curSec,
+      active: prev.pointB !== null && curSec < prev.pointB,
+    }));
+  };
+
+  const handleSetPointB = () => {
+    const cur = videoRef.current?.currentTime || currentTime;
+    const curSec = Math.floor(cur);
+    setAbRepeat((prev) => ({
+      ...prev,
+      pointB: curSec,
+      active: prev.pointA !== null && prev.pointA < curSec,
+    }));
+  };
+
+  const handleClearAbRepeat = () => {
+    setAbRepeat({ pointA: null, pointB: null, active: false });
+  };
+
+  const handleToggleAbRepeat = () => {
+    setAbRepeat((prev) => ({
+      ...prev,
+      active: !prev.active && prev.pointA !== null && prev.pointB !== null && prev.pointA < prev.pointB,
+    }));
+  };
+
+  // Web Audio API DSP Equalizer Hardware Graph
+  const audioGraphRef = useRef<PlayerAudioGraph | null>(null);
+
+  const initAudioGraph = useCallback(() => {
+    if (!videoRef.current || audioGraphRef.current) return;
+    try {
+      const graph = createAudioGraph(videoRef.current);
+      if (graph) {
+        audioGraphRef.current = graph;
+        applyDspPreset(graph, audioPreset);
       }
-      setSleepTimer(null);
-    }, sleepTimer * 60 * 1000);
-    return () => clearTimeout(timer);
+    } catch (e) {
+      console.warn('Audio DSP initialization notice:', e);
+    }
+  }, [audioPreset]);
+
+  useEffect(() => {
+    if (audioGraphRef.current) {
+      applyDspPreset(audioGraphRef.current, audioPreset);
+    }
+  }, [audioPreset]);
+
+  // Generate WebVTT synchronized demo subtitles track
+  useEffect(() => {
+    if (video.title) {
+      setVttSubUrl(buildDemoVttSubtitle(video.title, duration));
+    }
+  }, [video.title, duration]);
+
+  // Toggle Subtitle track mode
+  useEffect(() => {
+    if (videoRef.current && videoRef.current.textTracks && videoRef.current.textTracks.length > 0) {
+      const track = videoRef.current.textTracks[0];
+      track.mode = subtitlesEnabled ? 'showing' : 'hidden';
+    }
+  }, [subtitlesEnabled]);
+
+  // Sleep Timer with live seconds countdown
+  useEffect(() => {
+    if (!sleepTimer || typeof sleepTimer !== 'number' || sleepTimer <= 0) {
+      setSleepTimerRemainingSec(null);
+      return;
+    }
+    const totalSec = sleepTimer * 60;
+    setSleepTimerRemainingSec(totalSec);
+
+    const interval = setInterval(() => {
+      setSleepTimerRemainingSec((prev) => {
+        if (prev === null || prev <= 1) {
+          if (videoRef.current) {
+            videoRef.current.pause();
+            setIsPlaying(false);
+          }
+          setSleepTimer(null);
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, [sleepTimer]);
+
+  // Autoplay countdown timer
+  useEffect(() => {
+    if (!showAutoplayOverlay) return;
+    if (autoplayCountdown <= 0) {
+      setShowAutoplayOverlay(false);
+      onNavigateNext?.();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setAutoplayCountdown((c) => c - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [showAutoplayOverlay, autoplayCountdown, onNavigateNext]);
 
   // Picture-in-Picture & Floating Player
   const { startFloatingPip } = usePip();
@@ -746,6 +926,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
     if (isWaiting) setIsWaiting(false);
     if (!isMediaReady) setIsMediaReady(true);
 
+    // A-B Repeat Loop Check
+    if (abRepeat.active && abRepeat.pointB !== null && abRepeat.pointA !== null && cur >= abRepeat.pointB) {
+      handleDirectSeek(abRepeat.pointA);
+      return;
+    }
+
     if (Math.floor(cur) % 10 === 0) {
       saveProgress(cur);
     }
@@ -812,6 +998,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           e.preventDefault();
           toggleOrientation();
           break;
+        case 'b':
+        case 'B':
+          e.preventDefault();
+          handleAddBookmark();
+          break;
+        case 'N':
+          if (e.shiftKey && onNavigateNext) {
+            e.preventDefault();
+            onNavigateNext();
+          }
+          break;
+        case 'P':
+          if (e.shiftKey && onNavigatePrev) {
+            e.preventDefault();
+            onNavigatePrev();
+          }
+          break;
+        case '[':
+          e.preventDefault();
+          handleSetPointA();
+          break;
+        case ']':
+          e.preventDefault();
+          handleSetPointB();
+          break;
+        case '\\':
+          e.preventDefault();
+          handleClearAbRepeat();
+          break;
         case '+':
         case '=':
           e.preventDefault();
@@ -833,7 +1048,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, skip, toggleMute, toggleFullscreen, toggleOrientation, zoomScale, setClampedZoom, resetZoom]);
+  }, [
+    togglePlay,
+    skip,
+    toggleMute,
+    toggleFullscreen,
+    toggleOrientation,
+    zoomScale,
+    setClampedZoom,
+    resetZoom,
+    handleAddBookmark,
+    handleSetPointA,
+    handleSetPointB,
+    handleClearAbRepeat,
+    onNavigateNext,
+    onNavigatePrev,
+  ]);
 
   // Save progress on pause or unmount
   useEffect(() => {
@@ -943,6 +1173,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           src={activeSrc}
           poster={resolvedThumbnail}
           preload="metadata"
+          crossOrigin={activeSrc.startsWith('/') || activeSrc.startsWith('blob:') || activeSrc.includes('zencdn.net') || activeSrc.includes('interactive-examples') || activeSrc.includes('githubusercontent') ? 'anonymous' : undefined}
+          onPlay={() => initAudioGraph()}
           onLoadedMetadata={handleLoadedMetadata}
           onDurationChange={() => {
             if (videoRef.current && videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
@@ -974,6 +1206,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
             setIsPlaying(false);
             setIsWaiting(false);
             if (videoRef.current) saveProgress(videoRef.current.duration);
+            if (isLooping && videoRef.current) {
+              videoRef.current.currentTime = 0;
+              videoRef.current.play().catch(() => {});
+              setIsPlaying(true);
+              return;
+            }
+            if (autoPlayNext && onNavigateNext && nextVideo) {
+              setShowAutoplayOverlay(true);
+              setAutoplayCountdown(5);
+            }
           }}
           onError={handleVideoError}
           className={`relative z-1 w-full h-full pointer-events-none transition-all ${
@@ -981,7 +1223,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           }`}
           loop={isLooping}
           playsInline
-        />
+        >
+          {vttSubUrl && (
+            <track
+              kind="subtitles"
+              src={vttSubUrl}
+              srcLang="en"
+              label="English"
+              default={subtitlesEnabled}
+            />
+          )}
+        </video>
       </div>
 
       {/* Invisible Touch/Click Layer for gestures & tap-to-toggle */}
@@ -989,6 +1241,56 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
         className="absolute inset-0 z-10 cursor-pointer"
         onClick={handleVideoTouchOrClick}
       />
+
+      {/* 5-Second Autoplay Next Video Countdown Overlay */}
+      {showAutoplayOverlay && nextVideo && (
+        <div
+          className="absolute inset-0 z-40 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center select-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="max-w-md w-full bg-[#131620] border border-white/10 rounded-2xl p-6 shadow-2xl space-y-4">
+            <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider">Up Next</span>
+            <h3 className="text-base sm:text-lg font-bold text-white line-clamp-2">{nextVideo.title}</h3>
+
+            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+              <svg className="w-16 h-16 -rotate-90">
+                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="3" className="text-white/10 fill-none" />
+                <circle
+                  cx="32"
+                  cy="32"
+                  r="28"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeDasharray={176}
+                  strokeDashoffset={176 - (176 * autoplayCountdown) / 5}
+                  strokeLinecap="round"
+                  className="text-indigo-500 fill-none transition-all duration-1000 ease-linear"
+                />
+              </svg>
+              <span className="absolute font-mono text-xl font-bold text-white">{autoplayCountdown}</span>
+            </div>
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setShowAutoplayOverlay(false);
+                  onNavigateNext?.();
+                }}
+                className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg shadow cursor-pointer transition-colors flex items-center gap-2"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Play Now</span>
+              </button>
+              <button
+                onClick={() => setShowAutoplayOverlay(false)}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-slate-300 text-xs font-semibold rounded-lg cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Zoom Badge Indicator with 1-Tap Reset */}
       {zoomScale > 1.05 && (
@@ -1255,6 +1557,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                     onSeek={handleDirectSeek}
                     maxBufferAhead={120}
                     contactSheetUrl={contactSheetUrl}
+                    chapters={chapters}
+                    bookmarks={bookmarks}
+                    abRepeat={abRepeat}
                   />
                 </div>
                 <div className="flex items-center gap-1.5 min-w-[28px] sm:min-w-[40px]">
@@ -1278,7 +1583,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
           {/* Action Buttons Row */}
           <div className="flex items-center justify-between gap-1 sm:gap-3">
             {/* Left Controls */}
-            <div className="flex items-center gap-0.5 sm:gap-2">
+            <div className="flex items-center gap-0.5 sm:gap-1.5">
+              {onNavigatePrev && (
+                <button
+                  onClick={onNavigatePrev}
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95 cursor-pointer"
+                  title="Previous Video (Shift+P)"
+                >
+                  <SkipBack className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </button>
+              )}
+
               <button
                 onClick={togglePlay}
                 className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-200 hover:text-amber-400 hover:bg-zinc-800/60 active:scale-95 cursor-pointer"
@@ -1291,9 +1606,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 )}
               </button>
 
+              {onNavigateNext && (
+                <button
+                  onClick={onNavigateNext}
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95 cursor-pointer"
+                  title="Next Video (Shift+N)"
+                >
+                  <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </button>
+              )}
+
               <button
                 onClick={() => skip(-10)}
-                title="Rewind 10s"
+                title="Rewind 10s (Left Arrow)"
                 className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -1301,7 +1626,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
 
               <button
                 onClick={() => skip(10)}
-                title="Forward 10s"
+                title="Forward 10s (Right Arrow)"
                 className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95 cursor-pointer"
               >
                 <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -1312,7 +1637,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                 <button
                   onClick={toggleMute}
                   className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-zinc-800/60 active:scale-95 cursor-pointer"
-                  title="Mute / Unmute"
+                  title="Mute / Unmute (M)"
                 >
                   {isMuted || volume === 0 ? (
                     <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-400" />
@@ -1331,6 +1656,47 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                   title="Volume"
                 />
               </div>
+
+              {/* Quick Bookmark Button */}
+              <button
+                onClick={handleAddBookmark}
+                title="Bookmark current timestamp (B)"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hidden sm:flex items-center justify-center text-slate-300 hover:text-amber-400 hover:bg-zinc-800/60 active:scale-95 cursor-pointer"
+              >
+                <BookmarkIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Active Status Badges: Sleep Timer & A-B Loop */}
+            <div className="hidden md:flex items-center gap-2">
+              {sleepTimerRemainingSec !== null && (
+                <div
+                  title="Click to cancel Sleep Timer"
+                  onClick={() => setSleepTimer(null)}
+                  className="px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[10px] font-mono flex items-center gap-1 cursor-pointer hover:bg-indigo-500/30 transition-colors"
+                >
+                  <Clock className="w-3 h-3 text-indigo-400 animate-pulse" />
+                  <span>
+                    Sleep: {Math.floor(sleepTimerRemainingSec / 60)}:
+                    {(sleepTimerRemainingSec % 60).toString().padStart(2, '0')}
+                  </span>
+                  <X className="w-2.5 h-2.5 ml-0.5 text-indigo-400 hover:text-white" />
+                </div>
+              )}
+
+              {abRepeat.active && abRepeat.pointA !== null && abRepeat.pointB !== null && (
+                <div
+                  title="Click to clear A-B Repeat Loop"
+                  onClick={handleClearAbRepeat}
+                  className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-mono flex items-center gap-1 cursor-pointer hover:bg-amber-500/30 transition-colors"
+                >
+                  <Repeat className="w-3 h-3 text-amber-400 animate-spin" />
+                  <span>
+                    Loop: {formatTimestamp(abRepeat.pointA)} - {formatTimestamp(abRepeat.pointB)}
+                  </span>
+                  <X className="w-2.5 h-2.5 ml-0.5 text-amber-400 hover:text-white" />
+                </div>
+              )}
             </div>
 
             {/* Right Controls */}
@@ -1398,6 +1764,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                   audioPreset={audioPreset}
                   onAudioPresetChange={(p) => setAudioPreset(p)}
                   sleepTimer={sleepTimer}
+                  sleepTimerRemainingSec={sleepTimerRemainingSec}
                   onSleepTimerChange={(t) => setSleepTimer(t)}
                   subtitlesEnabled={subtitlesEnabled}
                   onSubtitlesToggle={() => setSubtitlesEnabled((prev) => !prev)}
@@ -1410,6 +1777,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, streamUrl }) =>
                     source: 'Vault Storage (B2)',
                     status: isWaiting ? 'Buffering' : isPlaying ? 'Playing' : 'Active & Secured',
                   }}
+                  bookmarks={bookmarks}
+                  onAddBookmark={handleAddBookmark}
+                  onJumpToBookmark={handleJumpToBookmark}
+                  onDeleteBookmark={handleDeleteBookmark}
+                  chapters={chapters}
+                  onJumpToChapter={handleJumpToChapter}
+                  abRepeat={abRepeat}
+                  onSetPointA={handleSetPointA}
+                  onSetPointB={handleSetPointB}
+                  onClearAbRepeat={handleClearAbRepeat}
+                  onToggleAbRepeat={handleToggleAbRepeat}
+                  currentTime={currentTime}
                   onTogglePictureInPicture={togglePictureInPicture}
                   onTogglePrivacyMode={handleTogglePrivacy}
                   onPanicLock={handleLockApp}

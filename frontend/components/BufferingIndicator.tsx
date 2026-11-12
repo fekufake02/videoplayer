@@ -2,12 +2,13 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { BufferedRange } from '../hooks/useBufferedSegments';
+import { IChapter, IBookmark } from '../types';
 import {
   getFrameIndexForTime,
   getContactSheetSpriteStyle,
   calculatePreviewClampedX,
-  DEFAULT_CONTACT_SHEET_CONFIG,
 } from '../lib/contactSheet';
+import { formatTimestamp } from '../lib/collectionsManager';
 
 interface BufferingIndicatorProps {
   bufferedRanges: BufferedRange[];
@@ -21,6 +22,13 @@ interface BufferingIndicatorProps {
   totalFrames?: number;
   cols?: number;
   rows?: number;
+  chapters?: IChapter[];
+  bookmarks?: IBookmark[];
+  abRepeat?: {
+    pointA: number | null;
+    pointB: number | null;
+    active: boolean;
+  };
 }
 
 export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
@@ -34,6 +42,9 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
   totalFrames = 10,
   cols = 5,
   rows = 2,
+  chapters = [],
+  bookmarks = [],
+  abRepeat,
 }) => {
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
@@ -41,29 +52,11 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
 
-  const isScrubbingRef = useRef(false);
-  isScrubbingRef.current = isScrubbing;
-
   if (!duration || duration <= 0) return null;
 
-  // Active display time is scrubTime if user is actively dragging/sliding, otherwise currentTime
   const displayTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
-  const safeDuration = (duration && isFinite(duration) && duration > 0) ? duration : 0;
+  const safeDuration = duration && isFinite(duration) && duration > 0 ? duration : 0;
   const playedPercent = safeDuration > 0 ? Math.min(100, Math.max(0, (displayTime / safeDuration) * 100)) : 0;
-
-  const formatTime = (secs: number) => {
-    if (typeof secs !== 'number' || !isFinite(secs) || isNaN(secs) || secs < 0) {
-      return '00:00';
-    }
-    const safeSecs = safeDuration > 0 ? Math.max(0, Math.min(safeDuration, secs)) : Math.max(0, secs);
-    const hrs = Math.floor(safeSecs / 3600);
-    const mins = Math.floor((safeSecs % 3600) / 60);
-    const s = Math.floor(safeSecs % 60);
-    if (hrs > 0) {
-      return `${hrs}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }
-    return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
 
   const getTimeFromX = useCallback(
     (clientX: number): { time: number; pos: number } => {
@@ -94,7 +87,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     }
   };
 
-  // Desktop Mouse Click & Slide Scrubbing
+  // Mouse Click & Slide Scrubbing
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsScrubbing(true);
@@ -127,7 +120,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     window.addEventListener('mouseup', onGlobalMouseUp);
   };
 
-  // Mobile Touch Tap & Sliding Scrubbing
+  // Touch Scrubbing
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length === 0) return;
     setIsScrubbing(true);
@@ -166,9 +159,19 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     window.addEventListener('touchcancel', onGlobalTouchEnd);
   };
 
+  // Active Chapter under hover
+  const activeHoverChapter =
+    hoverTime !== null
+      ? chapters.find(
+          (ch) =>
+            hoverTime >= ch.startTime &&
+            (ch.endTime === undefined || hoverTime < ch.endTime)
+        )
+      : null;
+
   return (
     <div
-      className="relative w-full py-3 sm:py-2 group cursor-pointer select-none touch-none flex items-center"
+      className="relative w-full py-3 sm:py-2.5 group cursor-pointer select-none touch-none flex items-center"
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onMouseDown={handleMouseDown}
@@ -196,7 +199,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
               className="absolute bottom-full mb-3 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
               style={{ left: `${clampedX}px` }}
             >
-              <div className="w-[140px] h-[78px] rounded-xl overflow-hidden border border-amber-400/50 shadow-2xl bg-zinc-950 relative flex flex-col justify-end">
+              <div className="w-[140px] h-[78px] rounded-xl overflow-hidden border border-accent/60 shadow-2xl bg-[#090A0F] relative flex flex-col justify-end">
                 {/* Contact sheet sprite background */}
                 <div
                   className="absolute inset-0 bg-no-repeat"
@@ -206,10 +209,16 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
                     backgroundSize: sprite.backgroundSize,
                   }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
-                {/* Timestamp pill inside preview */}
-                <div className="relative z-10 mx-auto mb-1 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md border border-white/10 text-amber-300 font-mono text-[10px] font-bold">
-                  {formatTime(hoverTime)}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent pointer-events-none" />
+                {/* Chapter name inside preview */}
+                {activeHoverChapter && (
+                  <div className="relative z-10 text-[9px] text-accent font-semibold px-2 truncate text-center">
+                    {activeHoverChapter.title}
+                  </div>
+                )}
+                {/* Timestamp pill */}
+                <div className="relative z-10 mx-auto mb-1 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md border border-white/10 text-white font-mono text-[10px] font-bold tabular-nums">
+                  {formatTimestamp(hoverTime)}
                 </div>
               </div>
             </div>
@@ -221,24 +230,25 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
             className="absolute bottom-full mb-2 pointer-events-none transform -translate-x-1/2 transition-transform duration-75 z-40"
             style={{ left: `${hoverPosition}px` }}
           >
-            <div className="bg-zinc-900/95 backdrop-blur-md text-amber-400 text-[11px] sm:text-xs font-mono font-bold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg border border-amber-400/30 shadow-2xl whitespace-nowrap">
-              {formatTime(hoverTime)}
+            <div className="bg-[#151925]/95 backdrop-blur-md text-accent text-xs font-mono font-bold px-2.5 py-1 rounded-lg border border-accent/30 shadow-2xl whitespace-nowrap tabular-nums">
+              {activeHoverChapter ? `${activeHoverChapter.title} • ` : ''}
+              {formatTimestamp(hoverTime)}
             </div>
           </div>
         );
       })()}
 
-      {/* Progress Track Bar */}
+      {/* Progress Track Bar (4px idle, 6px hover per master spec) */}
       <div
         ref={progressBarRef}
         className={`relative w-full rounded-full transition-all overflow-hidden ${
-          isScrubbing ? 'h-2 sm:h-2.5 bg-zinc-800' : 'h-1.5 group-hover:h-2.5 bg-zinc-800/90'
+          isScrubbing ? 'h-1.5 sm:h-2 bg-white/[0.08]' : 'h-1 group-hover:h-1.5 bg-white/[0.08]'
         }`}
       >
-        {/* Base Track */}
-        <div className="absolute inset-0 bg-white/15 rounded-full" />
+        {/* Base Unplayed Track */}
+        <div className="absolute inset-0 bg-white/[0.14] rounded-full" />
 
-        {/* Buffered Segments (Accurate loaded buffer ranges in light translucent gray/white) */}
+        {/* Buffered Segments (Translucent White) */}
         {bufferedRanges && bufferedRanges.length > 0 && bufferedRanges.map((range, idx) => {
           const startPercent = Math.max(0, Math.min(100, (range.start / duration) * 100));
           const endPercent = Math.max(0, Math.min(100, (range.end / duration) * 100));
@@ -249,15 +259,30 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
           return (
             <div
               key={idx}
-              className="absolute top-0 bottom-0 bg-white/40 transition-all rounded-full"
+              className="absolute top-0 bottom-0 bg-white/30 transition-all rounded-full"
               style={{
                 left: `${startPercent}%`,
                 width: `${widthPercent}%`,
               }}
-              title={`Buffered: ${formatTime(range.start)} - ${formatTime(range.end)}`}
+              title={`Buffered: ${formatTimestamp(range.start)} - ${formatTimestamp(range.end)}`}
             />
           );
         })}
+
+        {/* A-B Loop Range Highlight */}
+        {abRepeat?.pointA !== null && abRepeat?.pointA !== undefined && (
+          <div
+            className="absolute top-0 bottom-0 bg-emerald-500/40 border-l border-r border-emerald-400 z-10"
+            style={{
+              left: `${(abRepeat.pointA / duration) * 100}%`,
+              width: `${
+                abRepeat.pointB !== null && abRepeat.pointB !== undefined
+                  ? Math.max(0, ((abRepeat.pointB - abRepeat.pointA) / duration) * 100)
+                  : Math.max(0, 100 - (abRepeat.pointA / duration) * 100)
+              }%`,
+            }}
+          />
+        )}
 
         {/* Hover ghost highlight */}
         {hoverPosition !== null && progressBarRef.current && (
@@ -269,20 +294,49 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
           />
         )}
 
-        {/* Played Progress Bar (High-Contrast Amber) */}
+        {/* Played Progress Bar (Accent Indigo #818CF8) */}
         <div
-          className="absolute top-0 bottom-0 bg-amber-400 rounded-full shadow-[0_0_12px_rgba(251,191,36,0.6)]"
+          className="absolute top-0 bottom-0 bg-[#818CF8] rounded-full shadow-[0_0_12px_rgba(129,140,248,0.5)]"
           style={{ width: `${playedPercent}%` }}
         />
+
+        {/* Chapter Tick Marks */}
+        {chapters.length > 1 &&
+          chapters.map((ch, idx) => {
+            if (ch.startTime <= 0) return null;
+            const pct = (ch.startTime / duration) * 100;
+            return (
+              <div
+                key={ch.id || idx}
+                className="absolute top-0 bottom-0 w-[2px] bg-black/75 z-20 pointer-events-none"
+                style={{ left: `${pct}%` }}
+                title={ch.title}
+              />
+            );
+          })}
+
+        {/* Bookmarks Dots */}
+        {bookmarks.length > 0 &&
+          bookmarks.map((bm) => {
+            const pct = (bm.timestamp / duration) * 100;
+            return (
+              <div
+                key={bm.id}
+                className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-amber-400 border border-black z-25 pointer-events-none"
+                style={{ left: `calc(${pct}% - 3px)` }}
+                title={bm.label || `Bookmark at ${formatTimestamp(bm.timestamp)}`}
+              />
+            );
+          })}
       </div>
 
-      {/* Scrubber Knob Thumb (Always interactive and visible while sliding or on mobile) */}
+      {/* Scrubber Knob Thumb */}
       <div
-        className={`absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-amber-400 rounded-full shadow-[0_0_10px_rgba(251,191,36,0.8)] border-2 border-zinc-950 transition-transform pointer-events-none z-30 ${
+        className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 sm:w-3.5 sm:h-3.5 bg-[#818CF8] rounded-full shadow-[0_0_10px_rgba(129,140,248,0.8)] border-2 border-[#090A0F] transition-transform pointer-events-none z-30 ${
           isScrubbing ? 'scale-125 opacity-100' : 'opacity-100 sm:opacity-0 group-hover:opacity-100 scale-100 group-hover:scale-110'
         }`}
         style={{
-          left: `calc(${playedPercent}% - ${isScrubbing ? '7px' : '7px'})`,
+          left: `calc(${playedPercent}% - 6px)`,
         }}
       />
     </div>

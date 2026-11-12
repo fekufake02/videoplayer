@@ -38,6 +38,12 @@ import { BufferingIndicator } from '../../../../components/BufferingIndicator';
 import { usePip } from '../../../../context/PipContext';
 import { getCachedContactSheet, generateContactSheet } from '../../../../lib/contactSheetGenerator';
 import { PlayerSettingsMenu, AspectRatioOption, AudioPreset } from '../../../../components/PlayerSettingsMenu';
+import {
+  saveDrivePlaybackProgress,
+  getDrivePlaybackProgress,
+  getNextVideoInQueue,
+  getPrevVideoInQueue,
+} from '../../../../lib/collectionsManager';
 
 type DrivePlaybackPreference = 'auto' | 'native' | 'embed';
 
@@ -83,7 +89,7 @@ export default function DriveWatchPage() {
   const [autoPlayNext, setAutoPlayNext] = useState<boolean>(true);
   const [isLooping, setIsLooping] = useState<boolean>(false);
   const [audioPreset, setAudioPreset] = useState<AudioPreset>('normal');
-  const [sleepTimer, setSleepTimer] = useState<number | null>(null);
+  const [sleepTimer, setSleepTimer] = useState<number | 'end' | null>(null);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(false);
 
   // Thumbnail Sync State
@@ -119,7 +125,7 @@ export default function DriveWatchPage() {
 
   // Sleep timer handler
   useEffect(() => {
-    if (!sleepTimer || sleepTimer <= 0) return;
+    if (!sleepTimer || typeof sleepTimer !== 'number' || sleepTimer <= 0) return;
     const timer = setTimeout(() => {
       if (videoRef.current) {
         videoRef.current.pause();
@@ -275,10 +281,32 @@ export default function DriveWatchPage() {
   // Video event handlers
   const handleTimeUpdate = () => {
     if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
+      const cur = videoRef.current.currentTime;
+      setCurrentTime(cur);
       if (isBuffering) setIsBuffering(false);
+      if (id && Math.floor(cur) % 5 === 0) {
+        saveDrivePlaybackProgress(id, cur, videoRef.current.duration || duration || 0);
+      }
     }
   };
+
+  // Fast stall recovery: if native player is stuck buffering for >4 seconds, auto-switch to Drive Preview
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (isBuffering && isPlaying && activePlayer === 'native') {
+      timer = setTimeout(() => {
+        if (playbackPreference === 'auto') {
+          handleSwitchPlayer(
+            'embed',
+            'Switched to Google Drive Preview player for immediate playback'
+          );
+        }
+      }, 4000);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isBuffering, isPlaying, activePlayer, playbackPreference]);
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
@@ -550,9 +578,21 @@ export default function DriveWatchPage() {
     );
   }
 
-  const streamSrc = video.driveStreamUrl || `/api/drive/videos/${video.driveFileId}/chunk-stream`;
+  // Avoid direct drive.google.com/uc links which stall waiting for full download; route through fast Range chunk proxy
+  const isDirectCdn =
+    video.driveStreamUrl &&
+    !video.driveStreamUrl.includes('drive.google.com') &&
+    !video.driveStreamUrl.includes('commondatastorage.googleapis.com') &&
+    !video.driveStreamUrl.includes('media.w3.org');
+
+  const streamSrc = isDirectCdn
+    ? video.driveStreamUrl
+    : `/api/drive/videos/${video.driveFileId}/chunk-stream`;
+
   const embedSrc = `https://drive.google.com/file/d/${video.driveFileId}/preview`;
   const siblingVideos = allVideos.filter((v) => v._id !== video._id).slice(0, 4);
+  const nextVideo = getNextVideoInQueue(video._id, allVideos);
+  const prevVideo = getPrevVideoInQueue(video._id, allVideos);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#090A0F] text-[#F4F5F8] font-sans">
@@ -670,6 +710,7 @@ export default function DriveWatchPage() {
               onClick={togglePlay}
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
+              onCanPlay={() => setIsBuffering(false)}
               onWaiting={() => setIsBuffering(true)}
               onPlaying={() => {
                 setIsBuffering(false);

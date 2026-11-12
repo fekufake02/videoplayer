@@ -1,0 +1,1786 @@
+Based on the code audit, your application already has a good foundation: dark design tokens, a responsive sidebar, video cards, a cinematic watch page, playback controls, timeline previews, a settings panel, and Google Drive integration.
+
+However, several features are either only visually implemented, partially functional, inconsistent between pages, or missing entirely. The next step should not be to redesign everything from scratch. It should be to finish the existing design system, make every visible control work, and bring the entire application to one consistent premium standard.
+
+Below is the complete remaining-work checklist, followed by a detailed implementation prompt you can give to your coding agent.
+
+# 1. Complete remaining-work audit
+
+## A. Global design system
+
+Partially improved
+
+Already implemented
+
+- Dark background and surface CSS variables.
+- Inter font stack.
+- Accent, success, warning, and danger colors.
+- Custom scrollbars.
+- Basic fade-in animation and glass effects.
+- Some reusable styling.
+
+Still remaining
+
+- Many components use hardcoded Tailwind colors instead of shared tokens.
+- Typography sizes, weights, and line heights are inconsistent.
+- Border radius and spacing are not standardized.
+- Focus-visible states are incomplete.
+- Light theme is not fully implemented.
+- Reduced-motion accessibility is missing or incomplete.
+- Hover, pressed, disabled, and loading states vary between components.
+
+Exact design requirements
+
+| Element           | Required styling         |
+| ----------------- | ------------------------ |
+| Main background   | `#090A0F`                |
+| Sidebar           | `#0C0E15`                |
+| Primary surface   | `#131620`                |
+| Secondary surface | `#191D29`                |
+| Hover surface     | `#202534`                |
+| Primary text      | `#F4F5FA`                |
+| Secondary text    | `#A1A6B5`                |
+| Muted text        | `#73798B`                |
+| Accent            | `#818CF8`                |
+| Border            | `rgba(255,255,255,0.08)` |
+| Success           | `#34D399`                |
+| Warning           | `#FBBF24`                |
+| Danger            | `#F87171`                |
+
+Standardize:
+
+- Page padding: 28–32px desktop, 20px tablet, 16px mobile.
+- Card radius: 14–16px.
+- Modal radius: 18–22px.
+- Input radius: 10–12px.
+- Buttons: 10–12px radius.
+- Small component gaps: 8px.
+- Standard gaps: 16px.
+- Section gaps: 28–32px.
+- Main page heading: 28–32px.
+- Section heading: 19–22px.
+- Card title: 14–16px.
+- Supporting text: 12–14px.
+
+Create reusable design tokens and components instead of repeatedly introducing new colors and styles.
+
+## B. Sidebar and navigation
+
+Partially improved
+
+Already implemented
+
+- All Videos.
+- Continue Watching.
+- Recently Viewed.
+- Liked Videos.
+- Vault Storage (B2).
+- Google Drive.
+- Settings & Privacy.
+- Collapsible desktop sidebar.
+- Mobile navigation drawer.
+- Active navigation states and badges.
+
+Still remaining
+
+1. Persist the collapsed/expanded sidebar preference.
+2. Add smooth mobile drawer opening and closing.
+3. Add a visible close button and proper backdrop.
+4. Prevent background scrolling when the drawer is open.
+5. Add accurate dynamic item counts.
+6. Add Collections and Playlists navigation.
+7. Distinguish Recently Added from Recently Watched.
+8. Improve active source indication for B2 and Drive.
+9. Add tooltips when the sidebar is collapsed.
+10. Improve keyboard navigation and focus states.
+
+Exact design
+
+- Desktop expanded width: 248px.
+- Desktop collapsed width: 76px.
+- Sidebar background: `#0C0E15`.
+- Right border: `1px solid rgba(255,255,255,0.06)`.
+- Navigation item height: 42–44px.
+- Icon size: 18px.
+- Navigation text: 13–14px, medium weight.
+- Active item: subtle indigo background with indigo icon and text.
+- Active indicator: 3px vertical accent line.
+- Hover: `#191D29`.
+- Collapsed tooltips: dark floating tooltip with 150ms delay.
+- Mobile drawer: approximately 280px wide, maximum 85vw.
+- Backdrop: black with 55% opacity and slight blur.
+
+## C. Dashboard and library
+
+Partially improved
+
+Already implemented
+
+- Main video library.
+- Continue Watching section.
+- Video thumbnails.
+- Resume progress.
+- Navigation to the watch page.
+- Basic filtering and sorting.
+
+Still remaining
+
+- Recently Added section.
+- Recently Watched section.
+- Favorites section.
+- Collections.
+- Playlists.
+- Storage usage overview.
+- Better empty states.
+- More advanced filtering.
+- Search and sorting consistency.
+- A more meaningful dashboard hierarchy.
+
+Exact recommended dashboard layout
+
+DASHBOARD PREVIEW
+
+# Your Library
+
+Your videos, organized in one place.
+
+Continue Watching
+
+View all →
+
+[A man standing on a hill looking at a planet in the sky - SeaArt AI](https://images.openai.com/static-rsc-4/7KOXgWeCcnnLt298ZlWweeLMRk9JG4wj6ouTkvjE7qLNFA5pnmnqMcMjKO7NJhXOPAw2gUvztdEYFirnwRlaMAN7o2KoG6Dksw9IE56H7jl_g5WSgOwendMMH-hfbdK5aYnrjICPAnIQjjvDEze2p5XJFClaY-jFHxmsPrv67BI?purpose=inline)
+
+Video title
+
+Resume from 12:34
+
+42% completed
+
+Recently Added
+
+[Prime Video: The Hidden Life of Trees](https://images.openai.com/static-rsc-4/q-snNb0Q5kCj4pPNXzc612DNd2EZcZyJFLMQ__7FQxKEZ4ItoQffulUopibXUyn61lQtiNayAa1C4ZImlqxjBUw6vNoCcYCxOSVG_jPymTq1AxhHHzO_8aP4ccaK-sd6uHyQdKnzeZvBoh1XpGWU0S30EXfu9DLjbUFq17ckP7I?purpose=inline)
+
+['The Age of A.I.', la serie documental sobre inteligencia artificial presentada por Robert Downey Junior, se estrena en YouTube](https://images.openai.com/static-rsc-4/cWeSF-uGxfSwsDkXh8AePLnfTDvsfurAiZPmNvGY9d5tdxeQzjLeoz4Zrp81xfcX-Nt0-ksspWptMTGzeSYWDqCX58qAlD_u_TxpfE29_kY2mpVASPI_Rr85ZTvlwHIPw8QTaQYg3fEQL-USseFX5UuHaLEt-8btX38_H0_aPxE?purpose=inline)
+
+[Visit Fiji: Cinematic Relaxation Video With Beautiful Nature and Beach Scenery - WeTipTrip](https://images.openai.com/static-rsc-4/lFm8fXFutJjUqUeFojIOd3Bq4XRU0ETX__8l9I0ptlC3Nd2wAp5lOajU1ccsyBxzdYrkSSdIW5dAlssr_k37D4-6wqKG9ZkKjUzFq__dDhAbB_7XRtbGfhXIrrAJ1A41i0dUXfNcYbQY-Qjs2ru241evlLLqxx5WOLhNs7qStBg?purpose=inline)
+
+My Collections
+
+Tutorials
+
+12 videos
+
+Movies
+
+8 videos
+
+Conceptual layout showing the intended hierarchy, not a screenshot of the current application.
+
+The dashboard should use:
+
+1. Continue Watching.
+2. Recently Added.
+3. My Collections.
+4. Recently Watched.
+5. Favorites or a personalized section.
+
+Avoid showing every section as an equally important grid. The Continue Watching section should receive the strongest visual emphasis.
+
+## D. Video cards
+
+Partially improved
+
+Already implemented
+
+- 16:9 thumbnails.
+- Video duration.
+- Favorite action.
+- Progress indicator.
+- Hover play overlay.
+- Source badges.
+- Grid and list modes.
+- Context actions.
+- Drive-specific card design.
+
+Still remaining
+
+- Consistent card design between B2 and Drive.
+- Last watched information.
+- Completed video indicator.
+- Collection assignment.
+- Hide from library action.
+- Better multi-select.
+- Touch-friendly menus.
+- Reliable favorite persistence.
+- Consistent loading skeletons.
+- Consistent empty thumbnail treatment.
+- Better list-view spacing.
+
+Exact design
+
+- Thumbnail aspect ratio: 16:9.
+- Card background: transparent by default.
+- Thumbnail radius: 12px.
+- Card title: 14px, weight 600.
+- Supporting metadata: 12px, muted.
+- Duration badge: bottom-right, black background with 80% opacity.
+- Source badge: top-left, compact.
+- Favorite button: top-right, visible on hover and always accessible on touch.
+- Hover: thumbnail scale 1.025 over 200ms.
+- Hover overlay: centered circular play icon with dark translucent background.
+- Progress bar: 3px high, indigo.
+- Completed state: subtle green check icon.
+- Context menu: 180–220px wide, dark elevated surface, clear dividers.
+
+Create a shared video-card foundation with source-specific variations. Do not maintain two visually unrelated card systems.
+
+## E. Normal video player
+
+Substantially improved
+
+Already implemented
+
+- Playback speed.
+- Skip forward/backward.
+- Fullscreen.
+- Picture-in-Picture.
+- Zoom and pan.
+- Touch gestures and double-tap seeking.
+- Buffering indicator.
+- Resume prompt.
+- Sleep timer.
+- Aspect ratio controls.
+- Audio preset interface.
+- Contact sheet generation.
+- Keyboard controls.
+- Timeline thumbnail previews and scrubbing.
+
+Still remaining
+
+1. Persistent playback preferences.
+2. Bookmarks.
+3. Chapters.
+4. A–B repeat.
+5. Queue and previous/next navigation.
+6. Functional autoplay next.
+7. Real subtitle support.
+8. Real audio processing.
+9. Better playback error recovery.
+10. Better player source/status indicators.
+11. More polished mobile controls.
+12. Better synchronization of settings with the actual video element.
+
+Exact design requirements
+
+- Player background: `#000000`.
+- Player aspect ratio: 16:9 by default.
+- Border radius: 16px desktop, 10px mobile.
+- Control gradient: transparent to `rgba(0,0,0,0.85)`.
+- Main play button: 56px desktop, 48px mobile.
+- Timeline: 4px idle, 6px on hover.
+- Timeline accent: `#818CF8`.
+- Buffered area: translucent white.
+- Played area: accent indigo.
+- Time labels: 12px tabular numerals.
+- Control icons: 20–22px.
+- Control spacing: 12–16px.
+- Settings menu: 300–340px desktop.
+- Settings mobile sheet: full width, maximum 85vh, rounded top corners.
+- All controls should fade away after inactivity, but remain visible on interaction.
+- Touch controls must not depend on mouse hover.
+
+Important functional gaps
+
+The settings menu currently exposes some options that do not fully control playback:
+
+- Autoplay next is not connected to next-video navigation.
+- Audio presets are UI state, not actual audio processing.
+- Subtitle toggle does not provide real subtitle-track support.
+
+These must be implemented end-to-end, not just styled.
+
+## F. Player settings
+
+Partially functional
+
+Already implemented
+
+- Playback category.
+- Behavior category.
+- Display category.
+- Audio category.
+- Subtitles category.
+- Sleep timer.
+- Privacy settings.
+- Information panel.
+- Desktop floating settings panel.
+- Mobile bottom sheet.
+- Submenus and Escape handling.
+
+Still remaining
+
+- Save settings across sessions.
+- Actual subtitle-track selector.
+- Actual audio processing.
+- Real autoplay next.
+- Show sleep timer countdown.
+- Custom sleep timer duration.
+- Better transitions between submenus.
+- Better mobile safe-area support.
+- Better scroll containment.
+- Clearer distinction between enabled and disabled states.
+
+Exact settings panel design
+
+- Background: `#151925`.
+- Border: `1px solid rgba(255,255,255,0.09)`.
+- Radius: 16px.
+- Shadow: `0 16px 50px rgba(0,0,0,0.45)`.
+- Desktop width: 320px.
+- Menu item height: 44px.
+- Icon size: 17px.
+- Text size: 13px.
+- Secondary value: 12px, muted.
+- Selected option: subtle indigo background.
+- Switch track: muted gray when off, indigo when on.
+- Switch thumb: white.
+- Mobile sheet: bottom aligned, 24px top radius, safe-area padding.
+- Back navigation: 40px touch target.
+
+## G. Google Drive library
+
+Partially improved
+
+Already implemented
+
+- Drive video listing.
+- Search and sorting.
+- Loading skeletons.
+- Drive video cards.
+- Thumbnail fallback.
+- Duration and file size.
+- Favorite action.
+- Context menu.
+- Open in Drive.
+- Download action.
+
+Still remaining
+
+- Folder navigation.
+- Breadcrumbs.
+- Collections.
+- Multi-select.
+- Playback progress.
+- Continue Watching for Drive videos.
+- Watched history.
+- Metadata drawer.
+- Storage overview.
+- Sync status dashboard.
+- Consistent card and context-menu behavior.
+
+Exact design
+
+- Drive source badge: compact outlined blue/indigo badge.
+- Breadcrumb height: 36px.
+- Folder cards: 16:9 preview where available, otherwise folder icon inside a 16:9 surface.
+- File metadata: 12px muted.
+- File size and duration: aligned horizontally.
+- Selected cards: 1px indigo border and subtle indigo surface.
+- Drive status: small dot with label such as Connected, Syncing, or Error.
+- Metadata panel: 360px desktop side drawer; full-width mobile sheet.
+- Multi-select toolbar: sticky bottom toolbar with selected count and bulk actions.
+
+## H. Google Drive watch/player
+
+Needs functional correction
+
+Already implemented
+
+- Native player mode.
+- Google Drive Preview mode.
+- Automatic mode.
+- Manual mode selection.
+- LocalStorage playback preference.
+- Switching notification.
+- Timestamp and playback state capture.
+- Aspect ratio controls.
+- Buffering indicator.
+- Native playback error fallback.
+
+Critical remaining problems
+
+1. Switching from native playback to the Drive iframe does not reliably preserve playback position.
+2. Switching back attempts restoration after a fixed delay instead of waiting for video readiness.
+3. Any native playback error can trigger iframe fallback, even when the real issue is authorization, network, or file availability.
+4. Player transition lifecycle is incomplete.
+5. Duplicate audio may occur during transitions.
+6. Failure of the second playback mode needs a clear recovery flow.
+7. Drive player controls are not as complete or touch-friendly as the normal player.
+8. Playback progress and resume state are not consistently integrated with the library.
+
+Required behavior
+
+- Save the last known native playback time before switching.
+- Only restore a timestamp when the destination player supports it.
+- Wait for `loadedmetadata` or `canplay` before setting native playback time.
+- Do not assume the iframe exposes its current playback time.
+- Do not promise exact position preservation when the Drive Preview iframe cannot expose that information.
+- Classify errors before deciding to switch modes.
+- Pause the old player before activating the new one.
+- Avoid two active audio sources.
+- Display a clear transition state.
+- Provide manual retry and mode selection.
+- Never loop automatically between modes.
+
+Design requirements
+
+- Player mode indicator: small pill in the top-right area.
+- Mode menu: dark dropdown with clear selected state.
+- Switching notification: compact toast with icon and mode name.
+- Error panel: centered icon, clear error description, Retry and Change Mode actions.
+- Loading state: consistent spinner and message.
+- Controls: reuse the normal player's visual system wherever supported by the underlying playback mode.
+
+## I. Missing library features
+
+Not implemented or incomplete
+
+These features should be added as proper pages or functional sections.
+
+| Feature           | Required behavior                                |
+| ----------------- | ------------------------------------------------ |
+| Collections       | Create, rename, delete and organize video groups |
+| Playlists         | Custom ordered video lists                       |
+| Bookmarks         | Save timestamps within videos                    |
+| Chapters          | Navigate video sections                          |
+| A–B repeat        | Repeat a selected time range                     |
+| Next/previous     | Navigate the current queue                       |
+| Recently Added    | Sort by creation/import date                     |
+| Recently Watched  | Sort by viewing history                          |
+| Storage dashboard | Show storage usage and source breakdown          |
+| Advanced filters  | Duration, source, date, status, favorites        |
+| Metadata drawer   | Detailed information and available actions       |
+
+## J. Responsive design and accessibility
+
+Partially improved
+
+Still remaining
+
+- Test narrow devices at 320, 360, 390, and 414px.
+- Improve mobile search access.
+- Fix settings sheet safe-area handling.
+- Ensure no horizontal overflow.
+- Improve Drive player touch interactions.
+- Add consistent keyboard focus states.
+- Add ARIA labels and semantic buttons.
+- Add reduced-motion support.
+- Test mobile landscape and fullscreen.
+- Prevent menus and overlays from being clipped.
+- Ensure touch targets are at least 44×44px.
+
+## K. Missing interaction polish
+
+The following details are important for making the product feel complete:
+
+- Tooltips on icon-only controls.
+- Consistent toast notifications.
+- Confirmation dialogs for destructive actions.
+- Skeleton loaders matching actual card dimensions.
+- Empty states with useful actions.
+- Error states with Retry actions.
+- Disabled states for unavailable features.
+- Proper loading feedback for long-running operations.
+- Smooth transitions between pages and menus.
+- Consistent button sizes and icon alignment.
+- Clear selected, active, pressed, and focused states.
+
+# 2. Complete implementation prompt
+
+The following is the master prompt. It covers the remaining work, exact styling, functionality, architecture, and quality requirements.
+
+# MASTER IMPLEMENTATION PROMPT — COMPLETE THE VIDEO LIBRARY AND PLAYER UI/UX
+
+## 1. Project objective
+
+You are working on an existing video library and video player application.
+
+Your task is to complete and polish the existing application into a premium, modern, production-quality video library and playback experience.
+
+This is an enhancement of an existing codebase, NOT a request to build a new application from scratch.
+
+First inspect the complete project structure and understand the existing architecture, components, state management, API integrations, storage services, routing, and playback implementation.
+
+Preserve all existing working functionality.
+
+Do not remove working features, replace existing integrations unnecessarily, or introduce duplicate implementations.
+
+Your primary goals are:
+
+1. Finish all partially implemented UI/UX features.
+2. Implement every visible control that currently only changes UI state.
+3. Standardize the design across all pages.
+4. Unify the normal and Google Drive player experiences wherever technically possible.
+5. Improve desktop, tablet, and mobile responsiveness.
+6. Improve loading, empty, error, and success states.
+7. Make the application feel cohesive, premium, and production-ready.
+
+Do not stop after making visual changes. Verify that the interactions and underlying behavior actually work.
+
+---
+
+# 2. Design direction
+
+Use a premium dark media-library aesthetic inspired by modern streaming applications and professional media management software.
+
+The visual direction should be:
+
+- Minimal.
+- Cinematic.
+- Sophisticated.
+- Spacious.
+- High contrast without excessive brightness.
+- Subtle rather than flashy.
+- Consistent across every screen.
+- Optimized for long viewing sessions.
+
+Avoid:
+
+- Excessive gradients.
+- Excessive glassmorphism.
+- Bright neon backgrounds.
+- Overly rounded cartoon-like elements.
+- Large unnecessary shadows.
+- Random colors.
+- Oversized headings.
+- Excessive animation.
+- Different design languages on different pages.
+
+Use indigo as the primary accent, with restrained success, warning, and danger colors.
+
+## 3. Global design tokens
+
+Create a centralized design system in the existing global stylesheet or appropriate theme configuration.
+
+Use these exact initial values:
+
+### Colors
+
+| Token            | Value                  |
+| ---------------- | ---------------------- |
+| Background       | #090A0F                |
+| Sidebar          | #0C0E15                |
+| Surface 1        | #131620                |
+| Surface 2        | #191D29                |
+| Surface Hover    | #202534                |
+| Surface Elevated | #1D2230                |
+| Primary Text     | #F4F5FA                |
+| Secondary Text   | #A1A6B5                |
+| Muted Text       | #73798B                |
+| Accent           | #818CF8                |
+| Accent Hover     | #707CF0                |
+| Accent Subtle    | rgba(129,140,248,0.12) |
+| Border           | rgba(255,255,255,0.08) |
+| Border Strong    | rgba(255,255,255,0.14) |
+| Success          | #34D399                |
+| Warning          | #FBBF24                |
+| Danger           | #F87171                |
+
+Use CSS variables for all these values.
+
+Do not scatter hardcoded color values throughout components.
+
+### Typography
+
+Use Inter as the primary font.
+
+Define a consistent type scale:
+
+- Page title: 30px / 36px, weight 700.
+- Page subtitle: 14px / 21px.
+- Section heading: 20px / 28px, weight 600.
+- Card heading: 14px / 20px, weight 600.
+- Body: 14px / 21px.
+- Secondary text: 13px / 19px.
+- Metadata: 12px / 18px.
+- Small labels: 11px / 16px.
+
+Use tabular numerals for:
+
+- Playback timestamps.
+- Video duration.
+- Storage sizes.
+- Progress values.
+- Timer countdowns.
+
+### Spacing
+
+Use a consistent spacing scale:
+
+- 4px: micro spacing.
+- 8px: compact spacing.
+- 12px: small spacing.
+- 16px: standard spacing.
+- 20px: medium spacing.
+- 24px: large spacing.
+- 32px: section spacing.
+- 40px: major section spacing.
+
+### Radius
+
+- Small controls: 8px.
+- Inputs and buttons: 10px.
+- Video cards: 14px.
+- Larger cards: 16px.
+- Modals: 20px.
+- Mobile bottom sheets: 22px top corners.
+
+### Shadows
+
+Use subtle elevation only.
+
+Default card shadow:\
+0 4px 18px rgba(0,0,0,0.16)
+
+Elevated panel shadow:\
+0 16px 50px rgba(0,0,0,0.40)
+
+Avoid shadows that create a glowing or neon appearance.
+
+### Animation
+
+Use consistent transitions:
+
+- Hover: 150–200ms.
+- Menu opening: 180ms.
+- Drawer opening: 220ms.
+- Modal opening: 200ms.
+- Thumbnail hover scale: 1.025.
+- Standard easing: cubic-bezier(0.2, 0.8, 0.2, 1).
+
+Respect prefers-reduced-motion.
+
+---
+
+# 4. Sidebar implementation
+
+Inspect the existing LibrarySidebar component.
+
+Keep its current navigation architecture and complete the following:
+
+### Navigation structure
+
+Library:
+
+- All Videos.
+- Continue Watching.
+- Recently Added.
+- Recently Watched.
+- Liked Videos.
+
+Organization:
+
+- Collections.
+- Playlists.
+
+Sources:
+
+- Vault Storage.
+- Google Drive.
+
+Preferences:
+
+- Settings & Privacy.
+
+### Desktop styling
+
+- Expanded width: 248px.
+- Collapsed width: 76px.
+- Background: #0C0E15.
+- Right border: rgba(255,255,255,0.06).
+- Navigation item height: 44px.
+- Icon size: 18px.
+- Label size: 13px.
+- Item radius: 9px.
+
+Active navigation item:
+
+- Background: rgba(129,140,248,0.12).
+- Text: #A5B4FC.
+- Icon: #A5B4FC.
+- Left indicator: 3px accent line.
+
+Hover:
+
+- Background: #191D29.
+
+Collapsed mode:
+
+- Center icons.
+- Show tooltips.
+- Maintain visible active states.
+
+### Mobile styling
+
+- Width: 280px.
+- Maximum width: 85vw.
+- Fixed drawer.
+- Dark backdrop with approximately 55% black opacity.
+- Smooth slide animation.
+- Close on backdrop click.
+- Close on navigation.
+- Close on Escape.
+- Prevent background scrolling.
+- Include safe-area support.
+
+Persist desktop collapsed state.
+
+Do not break existing routing.
+
+---
+
+# 5. Dashboard implementation
+
+Improve the existing dashboard without removing its existing video library functionality.
+
+### Required section order
+
+1. Continue Watching.
+2. Recently Added.
+3. My Collections.
+4. Recently Watched.
+5. Favorites.
+
+### Page header
+
+Title: "Your Library"
+
+Subtitle: "Your videos, organized in one place."
+
+Include:
+
+- Search.
+- View mode toggle.
+- Sort menu.
+- Filter menu.
+- Add/import action if supported by the existing backend.
+
+### Continue Watching
+
+This should be the most prominent dashboard section.
+
+Display:
+
+- Thumbnail.
+- Video title.
+- Last watched information.
+- Playback progress.
+- Current playback position.
+- Total duration.
+- Resume action.
+
+Design:
+
+- Horizontal card layout.
+- Thumbnail width approximately 180–220px on desktop.
+- Thumbnail aspect ratio 16:9.
+- Card background #131620.
+- Radius 14px.
+- Progress bar height 4px.
+- Accent color #818CF8.
+
+On mobile:
+
+- Stack the card content vertically where needed.
+- Maintain a clear resume action.
+- Avoid clipping the title or progress bar.
+
+### Recently Added
+
+Create a horizontally arranged section.
+
+Display:
+
+- Video thumbnail.
+- Title.
+- Date added.
+- Duration.
+- Source badge.
+
+Add a "View all" action.
+
+### My Collections
+
+Display collection cards with:
+
+- Collection name.
+- Number of videos.
+- Cover thumbnail or composed thumbnail.
+- Updated date.
+- Context menu.
+
+Actions:
+
+- Create.
+- Rename.
+- Delete.
+- Add videos.
+- Remove videos.
+
+Use a compact 2–4 column responsive grid.
+
+### Recently Watched
+
+Display the most recently played videos.
+
+Include:
+
+- Thumbnail.
+- Title.
+- Last watched date.
+- Progress.
+- Duration.
+
+### Favorites
+
+Display videos marked as liked.
+
+If the existing application has a favorite data source, use it instead of creating a second source of truth.
+
+### Empty states
+
+Create attractive empty states for all sections.
+
+Each empty state should include:
+
+- Appropriate icon.
+- Short title.
+- One-line explanation.
+- Relevant action.
+
+Do not show blank sections with empty grids.
+
+---
+
+# 6. Shared video-card system
+
+Refactor VideoCard and DriveVideoCard into a shared design foundation with source-specific data and actions.
+
+Do not duplicate the entire card implementation.
+
+### Card design
+
+- Thumbnail: 16:9.
+- Radius: 12px.
+- Card title: 14px, weight 600.
+- Metadata: 12px.
+- Progress bar: 3px.
+- Hover thumbnail scale: 1.025.
+- Transition: 200ms.
+
+### Thumbnail overlays
+
+Top-left:
+
+- Source badge.
+
+Top-right:
+
+- Favorite button.
+
+Bottom-right:
+
+- Duration badge.
+
+Center:
+
+- Play button on hover or keyboard focus.
+
+Bottom:
+
+- Playback progress bar when applicable.
+
+### Card metadata
+
+Display:
+
+- Title.
+- Duration.
+- File size when available.
+- Source.
+- Last watched date when available.
+- Completed status when applicable.
+
+Do not display unavailable metadata as fabricated values.
+
+### Context menu
+
+Actions should include only supported operations:
+
+- Play.
+- Resume.
+- Add to collection.
+- Add to playlist.
+- Add/remove favorite.
+- Mark watched/unwatched.
+- Hide from library.
+- Open in Drive where relevant.
+- Download where supported.
+- View details.
+- Delete where supported.
+
+Use a dark menu with:
+
+- Width: 200px.
+- Radius: 12px.
+- Row height: 40px.
+- Icon size: 16px.
+- Text size: 13px.
+- Dividers between action groups.
+
+### Multi-select
+
+Support:
+
+- Checkbox selection.
+- Selected card border.
+- Selected count.
+- Select all where appropriate.
+- Bulk actions.
+
+On touch devices, provide explicit action buttons rather than relying on hover.
+
+### Persistence
+
+Favorite, watched, and collection actions must update the correct data source.
+
+Handle loading, success, and failure states.
+
+---
+
+# 7. Normal video player completion
+
+Inspect the existing VideoPlayer implementation.
+
+Preserve working features:
+
+- Speed control.
+- Skip intervals.
+- Fullscreen.
+- Picture-in-Picture.
+- Zoom and pan.
+- Double-tap seeking.
+- Touch gestures.
+- Sleep timer.
+- Aspect ratio.
+- Buffering state.
+- Timeline preview.
+- Contact sheet support.
+- Keyboard shortcuts.
+
+Improve the existing player instead of replacing it.
+
+### Player layout
+
+Desktop:
+
+- Centered player.
+- Maximum width approximately 1440px.
+- 16:9 default ratio.
+- 16px radius.
+- Black background.
+
+Mobile:
+
+- Full available width.
+- 10px radius.
+- Responsive control sizing.
+- Touch-friendly timeline.
+- No horizontal overflow.
+
+### Player controls
+
+Top overlay:
+
+- Back to library.
+- Video title where appropriate.
+- Source indicator.
+- More options.
+
+Center:
+
+- Previous.
+- Rewind.
+- Play/pause.
+- Forward.
+- Next.
+
+Bottom:
+
+- Timeline.
+- Current time.
+- Total duration.
+- Play/pause.
+- Skip.
+- Volume.
+- Playback speed.
+- Subtitles.
+- Settings.
+- Picture-in-Picture.
+- Fullscreen.
+
+Use consistent icon sizes of approximately 20–22px.
+
+The main play button should be approximately 56px on desktop and 48px on mobile.
+
+### Timeline
+
+- Idle height: 4px.
+- Hover height: 6px.
+- Played section: #818CF8.
+- Buffered section: translucent white.
+- Unplayed section: rgba(255,255,255,0.24).
+- Time labels: 12px tabular numerals.
+
+Preserve existing thumbnail preview and scrubbing functionality.
+
+### Bookmarks
+
+Add bookmark functionality.
+
+Users should be able to:
+
+- Save the current timestamp.
+- Add an optional title.
+- View saved bookmarks.
+- Jump to a bookmark.
+- Rename a bookmark.
+- Delete a bookmark.
+
+Use a bookmark panel accessible from player settings or a dedicated player control.
+
+### Chapters
+
+Support chapter markers when chapter metadata exists.
+
+Display:
+
+- Chapter titles.
+- Start timestamps.
+- Timeline markers.
+- Chapter navigation.
+
+Do not invent chapters for videos without chapter data.
+
+### A–B repeat
+
+Add A–B repeat controls.
+
+Behavior:
+
+1. Set point A.
+2. Set point B.
+3. Repeat the interval.
+4. Clear repeat.
+
+Display the active A and B timestamps.
+
+### Next and previous
+
+Add a queue or playback context.
+
+Support:
+
+- Previous video.
+- Next video.
+- Current queue.
+- Queue ordering.
+- Autoplay next.
+- Empty queue state.
+
+Only navigate to another video when a valid next item exists.
+
+### Resume
+
+Preserve playback progress.
+
+Avoid storing progress on every tiny time update.
+
+Use sensible throttling and save on:
+
+- Periodic playback intervals.
+- Pause.
+- Seeking.
+- Page exit where supported.
+- Video end.
+
+Mark a video completed using an explicit completion threshold, and make the threshold configurable.
+
+---
+
+# 8. Complete player settings functionality
+
+Inspect PlayerSettingsMenu and connect every setting to actual playback behavior.
+
+### Playback
+
+- Playback speed.
+- Skip forward interval.
+- Skip backward interval.
+
+### Behavior
+
+- Autoplay next.
+- Loop current video.
+- Resume from last position.
+
+### Display
+
+- Aspect ratio.
+- Picture-in-Picture.
+- Zoom mode.
+
+### Audio
+
+If audio presets are offered, implement real audio processing using an appropriate browser audio-processing approach.
+
+Possible presets:
+
+- Standard.
+- Bass Boost.
+- Voice Clarity.
+- Night Mode.
+
+If a preset cannot be supported for a particular source or browser, display a clear disabled state with an explanation.
+
+Do not pretend that changing a label changes the sound.
+
+### Subtitles
+
+Implement actual subtitle support.
+
+Support appropriate browser-compatible formats, such as WebVTT, and use HTML video text tracks where available.
+
+Allow:
+
+- Off.
+- Available subtitle tracks.
+- Track selection.
+- Subtitle language display.
+- Subtitle styling where supported.
+
+Do not show fake subtitle options when no track exists.
+
+### Sleep timer
+
+Support:
+
+- 15 minutes.
+- 30 minutes.
+- 45 minutes.
+- 60 minutes.
+- Custom duration.
+- End of current video.
+
+Show remaining time while active.
+
+Provide Cancel Timer.
+
+### Persistence
+
+Save user preferences using the existing storage architecture.
+
+Use localStorage only for appropriate local preferences.
+
+Keep server-backed preferences server-backed where the application already supports them.
+
+Avoid conflicting settings sources.
+
+### Settings panel styling
+
+Desktop:
+
+- Width: 320px.
+- Background: #151925.
+- Border: rgba(255,255,255,0.09).
+- Radius: 16px.
+- Shadow: 0 16px 50px rgba(0,0,0,0.45).
+
+Mobile:
+
+- Bottom sheet.
+- Full width.
+- Maximum height: 85vh.
+- Rounded top corners.
+- Safe-area padding.
+- Scrollable content.
+- Background scroll locked.
+- Clear drag handle if drag interaction is implemented.
+
+---
+
+# 9. Google Drive library improvements
+
+Inspect the existing Drive page and preserve its API integration.
+
+Add:
+
+### Folder navigation
+
+- Folder list.
+- Folder open action.
+- Breadcrumb navigation.
+- Back navigation.
+- Empty folder state.
+- Loading state.
+
+### Collections
+
+Allow Drive videos to be included in collections if supported by the application's data model.
+
+### Metadata drawer
+
+Display available:
+
+- File name.
+- MIME type.
+- File size.
+- Duration.
+- Created date.
+- Modified date.
+- Source.
+- Available playback modes.
+
+Do not fabricate unavailable metadata.
+
+### Drive storage overview
+
+If the connected Drive API exposes storage information, show:
+
+- Total storage.
+- Used storage.
+- Available storage.
+- Usage percentage.
+
+If storage information is unavailable, show an honest unavailable state.
+
+### Sync status
+
+Support meaningful states:
+
+- Connected.
+- Syncing.
+- Synced.
+- Permission required.
+- Error.
+
+Do not display a successful sync state without confirmation from the underlying integration.
+
+### Bulk actions
+
+Add multi-select and supported bulk actions.
+
+### Drive card consistency
+
+Use the shared video-card foundation.
+
+Keep Drive-specific metadata and actions as extensions.
+
+---
+
+# 10. Google Drive watch/player reliability
+
+This is a high-priority functional area.
+
+Inspect the existing native, Drive Preview, and Automatic playback implementation.
+
+Do not assume an iframe exposes playback position or state.
+
+### Mode switching
+
+When switching from native playback:
+
+1. Capture the last known native playback position.
+2. Capture whether playback was active.
+3. Pause the native player.
+4. Transition to the selected mode.
+5. Restore the position only if the destination player supports it.
+6. Restore playback state only when appropriate.
+
+When switching back to native:
+
+1. Initialize the video source.
+2. Wait for loadedmetadata or canplay.
+3. Restore the saved timestamp if valid.
+4. Resume only if the previous playback state and browser restrictions allow it.
+
+Do not use arbitrary fixed delays as the primary synchronization mechanism.
+
+### Error classification
+
+Distinguish:
+
+- Unsupported media format.
+- Network failure.
+- Permission failure.
+- Missing file.
+- Expired or invalid URL.
+- Browser playback restriction.
+- Temporary service failure.
+
+Do not automatically switch to Drive Preview for every native playback error.
+
+Only perform automatic fallback when the failure is appropriate for fallback.
+
+### Duplicate playback prevention
+
+Ensure:
+
+- Only one player is active.
+- The previous player is paused before activating the new player.
+- No duplicate audio is produced.
+- Event listeners are cleaned up.
+- Repeated switching does not create duplicate state or subscriptions.
+
+### Error recovery UI
+
+Display:
+
+- Clear error title.
+- Short explanation.
+- Retry button.
+- Change playback mode button.
+- Return to library button.
+
+### Honest limitations
+
+When Drive Preview cannot expose the current timestamp, do not claim that exact playback-position restoration is possible.
+
+Show a clear message if a mode switch may restart playback.
+
+### Shared player controls
+
+Reuse the same visual controls, typography, spacing, tooltips, and interaction patterns as the normal player.
+
+Where the iframe prevents custom control integration, clearly distinguish native browser or Google-provided controls.
+
+Do not create a misleading control that appears functional but cannot control the iframe.
+
+---
+
+# 11. Collections and playlists
+
+Create complete functional experiences for both.
+
+### Collections
+
+Users should be able to:
+
+- Create collection.
+- Rename collection.
+- Delete collection.
+- Add videos.
+- Remove videos.
+- View collection contents.
+- Change cover image if supported.
+- Search within collection.
+
+### Playlists
+
+Users should be able to:
+
+- Create playlist.
+- Rename playlist.
+- Delete playlist.
+- Add videos.
+- Remove videos.
+- Reorder videos.
+- Play all.
+- Continue from a selected item.
+
+### Design
+
+Collection cards:
+
+- Surface #131620.
+- Radius 14px.
+- Thumbnail composition where possible.
+- Folder icon fallback.
+- Title 14px semibold.
+- Metadata 12px muted.
+- Subtle hover surface.
+
+Playlist rows:
+
+- 56–68px height.
+- Thumbnail 64×36px.
+- Title 13–14px.
+- Duration 12px.
+- Drag handle where reordering is supported.
+- Selected state using subtle indigo.
+
+Provide clear empty states and confirmation dialogs.
+
+---
+
+# 12. Search, filters, and sorting
+
+Create a consistent search experience across the library and Drive sections.
+
+### Search
+
+- Search by video title.
+- Search by supported metadata.
+- Debounce requests where appropriate.
+- Clear button.
+- Keyboard shortcut if consistent with the application.
+- Mobile search overlay.
+
+### Filters
+
+Support available data fields:
+
+- Source.
+- Duration.
+- Date added.
+- Watched/unwatched.
+- Favorites.
+- Continue Watching.
+- Completed.
+
+### Sorting
+
+Support:
+
+- Recently added.
+- Recently watched.
+- Name A–Z.
+- Name Z–A.
+- Duration.
+- File size where available.
+
+### Design
+
+Search input:
+
+- Height: 40px.
+- Background: #131620.
+- Border: standard border token.
+- Radius: 10px.
+- Icon: 16px.
+- Focus border: accent.
+- Clear button aligned to the right.
+
+Filter menu:
+
+- Dark elevated panel.
+- Consistent option rows.
+- Selected checkmarks.
+- Clear all.
+- Apply action when appropriate.
+
+Show active filters as removable chips.
+
+---
+
+# 13. Responsive design
+
+Implement and verify responsive behavior at these viewport widths:
+
+- 320px.
+- 360px.
+- 390px.
+- 414px.
+- 768px.
+- 1024px.
+- 1280px.
+- 1440px.
+- 1920px.
+
+### Mobile
+
+- Single-column layouts where appropriate.
+- Sidebar as a drawer.
+- Search available through a dedicated overlay or accessible input.
+- Controls with minimum 44×44px touch targets.
+- No hover-only actions.
+- Settings as bottom sheet.
+- No horizontal overflow.
+- Correct safe-area handling.
+- Player controls usable in portrait and landscape.
+
+### Tablet
+
+- Compact sidebar or drawer as appropriate.
+- Two-column card layout where space allows.
+- Avoid excessively wide text blocks.
+- Settings and metadata panels should fit the viewport.
+
+### Desktop
+
+- Consistent maximum content width.
+- Comfortable page padding.
+- Stable sidebar.
+- Proper grid density.
+- No stretched video cards.
+
+Test Android Chrome and iOS Safari where possible.
+
+---
+
+# 14. Accessibility and interaction quality
+
+Implement:
+
+- Keyboard navigation.
+- Visible focus-visible styles.
+- Accessible button labels.
+- ARIA labels for icon-only controls.
+- Semantic buttons and links.
+- Correct dialog roles.
+- Escape-to-close behavior.
+- Proper focus management in dialogs and drawers.
+- Reduced-motion support.
+- Sufficient text contrast.
+- Minimum touch targets of 44×44px.
+
+Every icon-only button must have a tooltip on desktop and an accessible label.
+
+Do not rely on color alone to communicate status.
+
+---
+
+# 15. Loading, empty, error, and confirmation states
+
+Every asynchronous section should have:
+
+### Loading
+
+- Skeleton matching the actual final component dimensions.
+- Subtle shimmer.
+- No large layout shifts.
+- No unnecessary spinner when a skeleton is more appropriate.
+
+### Empty
+
+- Relevant icon.
+- Clear title.
+- Short explanation.
+- Useful action.
+
+### Error
+
+- Clear title.
+- Human-readable description.
+- Retry action.
+- Optional secondary action.
+- Do not expose raw API errors to users.
+
+### Success
+
+- Compact toast.
+- Appropriate icon.
+- Short confirmation.
+- Automatically dismiss where appropriate.
+
+### Destructive confirmation
+
+Use a confirmation dialog for destructive operations such as deleting a collection or removing a video permanently.
+
+Never show a success toast before the underlying operation succeeds.
+
+---
+
+# 16. Code quality and implementation rules
+
+Before changing code:
+
+1. Inspect the repository.
+2. Identify existing shared components.
+3. Identify existing API contracts.
+4. Understand how video metadata is stored.
+5. Understand how playback progress is stored.
+6. Understand Google Drive authentication and playback URLs.
+7. Identify existing state management.
+8. Identify existing styling conventions.
+
+Implementation requirements:
+
+- Reuse existing services and API endpoints.
+- Do not invent backend endpoints.
+- Do not hardcode fake video data.
+- Do not create fake storage statistics.
+- Do not introduce duplicate sources of truth.
+- Do not break existing authentication.
+- Do not remove existing routes.
+- Do not unnecessarily replace working libraries.
+- Avoid large unrelated refactors.
+- Clean up event listeners and subscriptions.
+- Handle asynchronous failures.
+- Use TypeScript types appropriately.
+- Keep components modular.
+- Avoid giant monolithic components.
+- Use reusable hooks for genuinely shared behavior.
+- Maintain consistent naming and file organization.
+
+If a feature requires backend support that does not exist, identify the missing contract and implement only what the current architecture safely supports. Clearly document what requires backend work.
+
+Do not disguise unsupported functionality with a visually active button.
+
+---
+
+# 17. Suggested implementation phases
+
+Complete the work in the following order.
+
+## Phase 1 — Design foundation
+
+- Centralize tokens.
+- Standardize typography.
+- Standardize spacing and radius.
+- Fix button, input, card, and modal styles.
+- Add focus and reduced-motion support.
+
+## Phase 2 — Existing UI completion
+
+- Sidebar.
+- Dashboard.
+- Shared video cards.
+- Search and filters.
+- Loading and empty states.
+- Responsive navigation.
+
+## Phase 3 — Normal player
+
+- Persistent settings.
+- Bookmarks.
+- Chapters.
+- A–B repeat.
+- Queue.
+- Autoplay next.
+- Subtitles.
+- Audio processing.
+- Playback recovery.
+
+## Phase 4 — Google Drive
+
+- Folder navigation.
+- Breadcrumbs.
+- Collections.
+- Metadata drawer.
+- Storage and sync status where supported.
+- Multi-select.
+- Playback progress.
+
+## Phase 5 — Drive player reliability
+
+- Correct switching lifecycle.
+- Error classification.
+- Position restoration where supported.
+- Duplicate playback prevention.
+- Shared player styling.
+- Better recovery states.
+
+## Phase 6 — Final polish and testing
+
+- Mobile refinements.
+- Keyboard accessibility.
+- Tooltips.
+- Animations.
+- Error states.
+- Cross-browser testing.
+- Build and regression testing.
+
+---
+
+# 18. Definition of done
+
+The project is not complete merely because the screens look attractive.
+
+Consider a feature complete only when:
+
+- Its visual design is consistent.
+- Its interaction works.
+- Its data is correctly persisted where required.
+- Loading state works.
+- Empty state works.
+- Error state works.
+- Mobile behavior works.
+- Keyboard behavior works where applicable.
+- Existing features remain functional.
+- No fake functionality is introduced.
+
+Verify at minimum:
+
+1. Build succeeds.
+2. TypeScript checks succeed.
+3. Existing routes load.
+4. Dashboard renders correctly.
+5. Search and filters work.
+6. Favorites persist.
+7. Collections and playlists work where implemented.
+8. Playback progress saves and resumes.
+9. Player settings actually affect playback.
+10. Sleep timer works.
+11. Next/previous navigation works.
+12. Google Drive playback modes recover correctly.
+13. Mobile navigation works.
+14. No major horizontal overflow exists.
+15. No critical browser-console errors remain.
+
+At the end, provide a completion report containing:
+
+- Files modified.
+- Features completed.
+- Features partially completed.
+- Backend/API dependencies.
+- Known browser limitations.
+- Build/test results.
+- Remaining issues.
+
+Do not claim a feature is complete unless it has been implemented and verified.
+
+**Final instruction:** Work incrementally on the existing codebase. Prioritize correctness, consistency, and usability over adding unnecessary visual effects. The finished application should feel like one carefully designed product rather than a collection of separately styled pages.
+
+# 3. Implementation priority
+
+I recommend giving your coding agent the master prompt above, but having it execute the work in smaller phases rather than trying to modify everything in one pass.
+
+## Recommended execution order
+
+1. Phase 1 — Design consistency
+
+   Start here
+
+   Design tokens, typography, spacing, sidebar, shared cards, dashboard.
+2. Phase 2 — Player functionality
+
+   Autoplay next, bookmarks, chapters, A–B repeat, persistent settings, subtitles and audio.
+3. Phase 3 — Drive reliability
+
+   Fix switching, playback recovery, progress tracking, folders, metadata and collections.
+4. Phase 4 — Library experience
+
+   Playlists, recently added, recently watched, favorites, storage dashboard and filters.
+5. Phase 5 — Final polish
+
+   Responsive QA, accessibility, skeletons, error handling, animations and regression tests.
+
+## 4. My top 10 things to fix first
+
+| Priority | Task                                                 | Importance |
+| -------- | ---------------------------------------------------- | ---------- |
+| 1        | Fix Drive player switching and recovery              | Critical   |
+| 2        | Implement actual autoplay next                       | Critical   |
+| 3        | Make settings genuinely functional                   | Critical   |
+| 4        | Unify normal and Drive player styling                | High       |
+| 5        | Implement persistent playback progress for Drive     | High       |
+| 6        | Complete dashboard sections                          | High       |
+| 7        | Create shared video-card architecture                | High       |
+| 8        | Finish mobile navigation and player controls         | High       |
+| 9        | Implement collections and playlists                  | Medium     |
+| 10       | Standardize all design tokens and interaction states | High       |
+
+One important recommendation: Don't let your coding agent implement all these changes in a single enormous code-generation pass. Ask it to finish one phase, inspect the changed files, run the build, and verify existing functionality before moving to the next phase. This will reduce regressions considerably.
+
+Scope note: This plan is based on the earlier static source-code audit. The application was not run through a full browser/device test during that audit, so the implementation agent should verify the current code before making changes.

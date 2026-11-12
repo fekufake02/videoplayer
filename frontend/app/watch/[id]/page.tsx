@@ -31,6 +31,7 @@ import {
   FolderLock,
 } from 'lucide-react';
 import { reprocessSingleVideoThumbnail } from '../../../lib/thumbnailGenerator';
+import { getNextVideoInQueue, getPrevVideoInQueue } from '../../../lib/collectionsManager';
 
 export default function WatchPage() {
   const params = useParams();
@@ -40,6 +41,7 @@ export default function WatchPage() {
   const { isAuthenticated, isLoading } = useAuth();
 
   const [video, setVideo] = useState<IVideo | null>(null);
+  const [allVideos, setAllVideos] = useState<IVideo[]>([]);
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [loadingMedia, setLoadingMedia] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
@@ -60,25 +62,28 @@ export default function WatchPage() {
     setError('');
 
     try {
-      const [detailsRes, streamRes] = await Promise.all([
+      const [detailsRes, streamRes, listRes] = await Promise.all([
         api.getVideoDetails(id),
         api.getStreamUrl(id),
+        api.listVideos({ limit: 100 }).catch(() => ({ success: false, videos: [] })),
       ]);
+
+      if (listRes?.success && listRes.videos) {
+        setAllVideos(listRes.videos);
+      }
 
       if (detailsRes.success && streamRes.success) {
         setVideo(detailsRes.video);
         const sampleStreams = [
-          'https://media.w3.org/2010/05/bunny/trailer.mp4',
           'https://vjs.zencdn.net/v/oceans.mp4',
-          'https://media.w3.org/2010/05/sintel/trailer.mp4',
           'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-          'https://media.w3.org/2010/05/video/movie_300.mp4',
+          'https://raw.githubusercontent.com/bower-media-samples/big-buck-bunny-480p-30s/master/video.mp4',
         ];
         const hashNum = (id || 'vid').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
         const fallback = sampleStreams[hashNum % sampleStreams.length];
 
         const streamUrlCandidate = streamRes.streamUrl || detailsRes.video.streamUrl;
-        const resolvedStream = (streamUrlCandidate && streamUrlCandidate.trim().length > 0 && !streamUrlCandidate.includes('commondatastorage.googleapis.com'))
+        const resolvedStream = (streamUrlCandidate && streamUrlCandidate.trim().length > 0 && !streamUrlCandidate.includes('commondatastorage.googleapis.com') && !streamUrlCandidate.includes('media.w3.org'))
           ? streamUrlCandidate
           : fallback;
         setStreamUrl(resolvedStream);
@@ -244,8 +249,20 @@ export default function WatchPage() {
           </div>
         ) : video && streamUrl ? (
           <>
-            {/* Cinematic Video Player */}
-            <VideoPlayer video={video} streamUrl={streamUrl} />
+            {/* Cinematic Video Player with Queue & DSP Navigation */}
+            {(() => {
+              const nextVid = getNextVideoInQueue(video._id, allVideos);
+              const prevVid = getPrevVideoInQueue(video._id, allVideos);
+              return (
+                <VideoPlayer
+                  video={video}
+                  streamUrl={streamUrl}
+                  queue={allVideos}
+                  onNavigateNext={nextVid ? () => router.push(`/watch/${nextVid._id}`) : undefined}
+                  onNavigatePrev={prevVid ? () => router.push(`/watch/${prevVid._id}`) : undefined}
+                />
+              );
+            })()}
 
             {/* Video Details & Meta Header */}
             <div className="bg-[#131620] border border-white/[0.07] p-4 sm:p-6 rounded-xl space-y-4 shadow-lg">

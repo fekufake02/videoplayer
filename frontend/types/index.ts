@@ -90,3 +90,35 @@ export interface DriveVideoListResponse {
   totalPages: number;
   folderId?: string;
 }
+
+export interface IBookmark {
+  id: string;
+  videoId: string;
+  timestamp: number;
+  label?: string;
+  createdAt: string;
+}
+
+export interface IChapter {
+  id: string;
+  title: string;
+  startTime: number;
+  endTime?: number;
+}
+
+export interface ICollection {
+  id: string;
+  name: string;
+  videoIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  coverUrl?: string;
+}
+
+export interface IPlaylist {
+  id: string;
+  name: string;
+  videoIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
