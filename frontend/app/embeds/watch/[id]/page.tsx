@@ -17,6 +17,12 @@ import {
 import { canvasToWebP, generateBlurhashFromCanvas } from '../../../../lib/thumbnailOptimizer';
 import { extractRealVideoFrameCanvas } from '../../../../lib/thumbnailGenerator';
 import {
+  downloadVideoOnClient,
+  ClientDownloadProgress,
+  ClientDownloadCorsError,
+  sanitizeDownloadFilename,
+} from '../../../../lib/clientDownloader';
+import {
   ArrowLeft,
   Tv,
   Play,
@@ -38,6 +44,8 @@ import {
   AlertCircle,
   Globe,
   Layers,
+  ShieldCheck,
+  Download,
   X,
 } from 'lucide-react';
 
@@ -67,6 +75,18 @@ function isSamePageUrl(a?: string, b?: string): boolean {
   }
 }
 
+function isOfficialTrustedIframe(urlStr?: string): boolean {
+  if (!urlStr) return false;
+  try {
+    const h = new URL(urlStr).hostname.toLowerCase();
+    return /youtube\.com|youtu\.be|player\.vimeo\.com|vimeo\.com|dailymotion\.com|streamable\.com|loom\.com|drive\.google\.com|player\.twitch\.tv|tiktok\.com/i.test(h);
+  } catch {
+    return false;
+  }
+}
+
+type PreviewStrategy = 'direct' | 'proxy-embed' | 'proxy-source' | 'proxy-noref';
+
 export default function EmbedWatchPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -80,20 +100,36 @@ export default function EmbedWatchPage() {
   const [loading, setLoading] = useState<boolean>(() => !embed);
   const [error, setError] = useState('');
 
-  // Player mode: 'embed' (iframe from original source) | 'preview' (direct video/HLS preview)
-  const [activeMode, setActiveMode] = useState<'embed' | 'preview'>('embed');
+  // Player modes
+  const [activeMode, setActiveMode] = useState<'preview' | 'embed'>('preview');
+  const [embedSubMode, setEmbedSubMode] = useState<'direct' | 'proxy'>('direct');
+  const [embedFrameReason, setEmbedFrameReason] = useState<string>('');
   const [embedLoaded, setEmbedLoaded] = useState(false);
   const [embedKey, setEmbedKey] = useState(0);
+  const [discoveredStreamUrl, setDiscoveredStreamUrl] = useState<string>('');
+
+  // Bridge state from proxied embed player
+  const [embedVideoState, setEmbedVideoState] = useState<{
+    hasVideo: boolean;
+    paused: boolean;
+    muted: boolean;
+    currentTime: number;
+    duration: number;
+  }>({ hasVideo: false, paused: true, muted: false, currentTime: 0, duration: 0 });
 
   // Direct preview player state
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const embedContainerRef = useRef<HTMLDivElement | null>(null);
+  const embedIframeRef = useRef<HTMLIFrameElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const thumbnailFileInputRef = useRef<HTMLInputElement | null>(null);
   const playRecordedRef = useRef<string | null>(null);
-  const retriedFreshStreamRef = useRef<string | null>(null);
+  const retriedRefreshForIdRef = useRef<string | null>(null);
+  const persistedDiscoveredRef = useRef<string | null>(null);
+  const downloadAbortRef = useRef<AbortController | null>(null);
 
-  const [useProxyForPreview, setUseProxyForPreview] = useState(false);
+  const [previewStrategyIndex, setPreviewStrategyIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -103,6 +139,11 @@ export default function EmbedWatchPage() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewError, setPreviewError] = useState('');
+
+  // Client download state (zero server streaming)
+  const [downloadProgress, setDownloadProgress] = useState<ClientDownloadProgress | null>(null);
+  const [isDownloadingClient, setIsDownloadingClient] = useState(false);
+  const [downloadCorsFallbackUrl, setDownloadCorsFallbackUrl] = useState<string | null>(null);
 
   // Metadata / Thumbnail UI state
   const [toastMsg, setToastMsg] = useState('');
@@ -117,10 +158,10 @@ export default function EmbedWatchPage() {
   const [editDirectUrl, setEditDirectUrl] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 3500);
-  };
+    setTimeout(() => setToastMsg(''), 3800);
+  }, []);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -144,17 +185,22 @@ export default function EmbedWatchPage() {
       }
       setEmbed(found);
       updateSingleEmbedInCache(found);
-      setUseProxyForPreview(false);
+      setPreviewStrategyIndex(0);
       setPreviewError('');
+      setDiscoveredStreamUrl('');
+      setDownloadCorsFallbackUrl(null);
+      setEmbedVideoState({ hasVideo: false, paused: true, muted: false, currentTime: 0, duration: 0 });
 
-      const foundHasEmbedPlayer = Boolean(found.embedUrl && !isSamePageUrl(found.embedUrl, found.sourceUrl));
       const foundHasDirect = Boolean(found.directMediaUrl);
-      if (foundHasDirect && (!foundHasEmbedPlayer || found.playbackType === 'direct')) {
+      const foundHasEmbed = Boolean(found.embedUrl && !isSamePageUrl(found.embedUrl, found.sourceUrl));
+      if (foundHasDirect && (!foundHasEmbed || found.playbackType === 'direct')) {
         setActiveMode('preview');
-      } else if (foundHasEmbedPlayer) {
+      } else if (foundHasEmbed) {
         setActiveMode('embed');
-      } else {
+      } else if (foundHasDirect) {
         setActiveMode('preview');
+      } else {
+        setActiveMode('embed');
       }
 
       if (listRes?.embeds) {
@@ -187,7 +233,140 @@ export default function EmbedWatchPage() {
     }
   }, [isAuthenticated, loadEmbed]);
 
-  // Wire direct preview <video> / HLS engine when activeMode === 'preview'
+  const effectiveDirectStream = discoveredStreamUrl || embed?.directMediaUrl || '';
+  const hasSeparateEmbedUrl = Boolean(embed?.embedUrl && !isSamePageUrl(embed?.embedUrl, embed?.sourceUrl));
+  const embedTargetUrl = hasSeparateEmbedUrl ? embed!.embedUrl! : embed?.sourceUrl || '';
+
+  // Compute strategy chain for Direct Preview fallback
+  const strategyList: PreviewStrategy[] = React.useMemo(() => {
+    if (!effectiveDirectStream) return [];
+    const looksHotlinkedOrHls = /\/get_file\/|\/hls\/|\.m3u8(\?|$)|token=|md5=|expires=/i.test(
+      effectiveDirectStream
+    );
+    const list: PreviewStrategy[] = [];
+    if (!looksHotlinkedOrHls) {
+      list.push('direct');
+    }
+    if (embed?.embedUrl && !isSamePageUrl(embed.embedUrl, embed.sourceUrl)) {
+      list.push('proxy-embed');
+    }
+    list.push('proxy-source');
+    list.push('proxy-noref');
+    if (looksHotlinkedOrHls) {
+      list.push('direct');
+    }
+    return list;
+  }, [effectiveDirectStream, embed?.embedUrl, embed?.sourceUrl]);
+
+  const currentStrategy = strategyList[previewStrategyIndex] || null;
+
+  const advancePreviewStrategy = useCallback(async () => {
+    if (previewStrategyIndex + 1 < strategyList.length) {
+      setPreviewStrategyIndex((idx) => idx + 1);
+      return;
+    }
+
+    // All URL proxy strategies failed — try re-scraping fresh stream URLs once if we haven't yet
+    if (embed && retriedRefreshForIdRef.current !== embed._id) {
+      retriedRefreshForIdRef.current = embed._id;
+      try {
+        const refreshed = await api.refreshEmbedMetadata(embed._id);
+        if (refreshed?.success && refreshed.embed) {
+          setEmbed(refreshed.embed);
+          updateSingleEmbedInCache(refreshed.embed);
+          if (
+            refreshed.embed.directMediaUrl &&
+            refreshed.embed.directMediaUrl !== effectiveDirectStream
+          ) {
+            setPreviewStrategyIndex(0);
+            setPreviewError('');
+            return;
+          }
+        }
+      } catch {
+        // Fall through to error panel
+      }
+    }
+
+    setIsBuffering(false);
+    setPreviewError(
+      'Direct stream could not be loaded directly (expired token or strict CDN protection). Switch to Embed Mode to play seamlessly inside the app.'
+    );
+  }, [previewStrategyIndex, strategyList.length, embed, effectiveDirectStream]);
+
+  // Pre-check whether embedTargetUrl permits iframe framing when entering Embed Mode
+  useEffect(() => {
+    if (activeMode !== 'embed' || !embedTargetUrl) return;
+    let cancelled = false;
+    setEmbedLoaded(false);
+    setEmbedFrameReason('');
+
+    if (isOfficialTrustedIframe(embedTargetUrl)) {
+      setEmbedSubMode('direct');
+      return;
+    }
+
+    // Check server-side whether X-Frame-Options or CSP blocks direct iframe
+    fetch(`/api/embed-check?url=${encodeURIComponent(embedTargetUrl)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data && data.frameable === false) {
+          setEmbedSubMode('proxy');
+          setEmbedFrameReason(data.reason || 'X-Frame-Options');
+        } else {
+          setEmbedSubMode('direct');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEmbedSubMode('direct');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMode, embedTargetUrl]);
+
+  // Listen to bridge messages from our in-app Safe Proxy Embed iframe
+  useEffect(() => {
+    const onMessage = (ev: MessageEvent) => {
+      const data = ev.data;
+      if (!data || typeof data !== 'object') return;
+
+      if (data.type === 'VAULT_EMBED_MEDIA_DISCOVERED' && typeof data.url === 'string') {
+        const mediaUrl = data.url.trim();
+        if (!mediaUrl || mediaUrl === discoveredStreamUrl) return;
+        setDiscoveredStreamUrl(mediaUrl);
+
+        // Persist newly discovered stream URL if missing so Direct Preview & Download work next time too
+        if (embed && !embed.directMediaUrl && persistedDiscoveredRef.current !== mediaUrl) {
+          persistedDiscoveredRef.current = mediaUrl;
+          api
+            .updateEmbedMetadata(embed._id, { directMediaUrl: mediaUrl })
+            .then((res) => {
+              if (res?.embed) {
+                setEmbed(res.embed);
+                updateSingleEmbedInCache(res.embed);
+              }
+            })
+            .catch(() => {});
+        }
+      } else if (data.type === 'VAULT_EMBED_STATE') {
+        setEmbedVideoState({
+          hasVideo: true,
+          paused: Boolean(data.paused),
+          muted: Boolean(data.muted),
+          currentTime: Number(data.currentTime) || 0,
+          duration: Number(data.duration) || 0,
+        });
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [embed, discoveredStreamUrl]);
+
+  // Wire direct preview <video> / HLS engine
   useEffect(() => {
     let cancelled = false;
     if (hlsRef.current) {
@@ -195,22 +374,24 @@ export default function EmbedWatchPage() {
       hlsRef.current = null;
     }
     const videoEl = videoRef.current;
-    if (!videoEl || activeMode !== 'preview' || !embed?.directMediaUrl) return;
+    if (!videoEl || activeMode !== 'preview' || !effectiveDirectStream || !currentStrategy) return;
 
-    const rawStream = embed.directMediaUrl;
-    const refQuery = embed.sourceUrl ? `&ref=${encodeURIComponent(embed.sourceUrl)}` : '';
-    const proxiedSrc = `/api/stream-proxy?url=${encodeURIComponent(rawStream)}${refQuery}`;
-    const looksLikeGetFileOrHotlink = /\/get_file\/|\/hls\/|mpegurl/i.test(rawStream);
+    const buildSrc = (strategy: PreviewStrategy): string => {
+      if (strategy === 'direct') return effectiveDirectStream;
+      if (strategy === 'proxy-embed' && embed?.embedUrl) {
+        return `/api/stream-proxy?url=${encodeURIComponent(effectiveDirectStream)}&ref=${encodeURIComponent(embed.embedUrl)}`;
+      }
+      if (strategy === 'proxy-source' && embed?.sourceUrl) {
+        return `/api/stream-proxy?url=${encodeURIComponent(effectiveDirectStream)}&ref=${encodeURIComponent(embed.sourceUrl)}`;
+      }
+      return `/api/stream-proxy?url=${encodeURIComponent(effectiveDirectStream)}&noRef=1`;
+    };
 
-    if (!useProxyForPreview && looksLikeGetFileOrHotlink) {
-      setUseProxyForPreview(true);
-      return;
-    }
-
+    const targetSrc = buildSrc(currentStrategy);
     setPreviewError('');
     setIsBuffering(true);
 
-    const attachHls = (srcToLoad: string, isAlreadyProxied: boolean) => {
+    const attachHls = (srcToLoad: string) => {
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
@@ -226,72 +407,53 @@ export default function EmbedWatchPage() {
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (cancelled || !data.fatal) return;
-          if (!isAlreadyProxied) {
-            setUseProxyForPreview(true);
-          } else {
-            setPreviewError('Could not load direct HLS stream in preview mode. Remote host may have expired or blocked this stream.');
-            setIsBuffering(false);
-          }
+          hls.destroy();
+          hlsRef.current = null;
+          advancePreviewStrategy();
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
         videoEl.src = srcToLoad;
         videoEl.load();
       } else {
-        setPreviewError('HLS playback is not supported in this browser.');
-        setIsBuffering(false);
+        advancePreviewStrategy();
       }
     };
 
-    if (!useProxyForPreview) {
-      const isObviousHls = /\.m3u8(\?|$)/i.test(rawStream);
-      if (isObviousHls) {
-        attachHls(rawStream, false);
+    if (currentStrategy === 'direct') {
+      if (/\.m3u8(\?|$)/i.test(targetSrc)) {
+        attachHls(targetSrc);
       } else {
-        videoEl.src = rawStream;
+        videoEl.src = targetSrc;
         videoEl.load();
       }
     } else {
-      // Probe via same-origin proxy (forwards Referer + inspects actual #EXTM3U vs MP4 content)
+      // Probe via same-origin proxy to detect HLS (#EXTM3U) vs HTML error pages vs MP4
       (async () => {
         try {
-          const probeRes = await fetch(
-            `/api/stream-proxy?probe=1&url=${encodeURIComponent(rawStream)}${refQuery}`
-          );
+          const probeRes = await fetch(`${targetSrc}&probe=1`);
           if (cancelled) return;
           if (probeRes.ok) {
             const probe = await probeRes.json();
             if (cancelled) return;
 
-            // If upstream token expired (403/404/410), refresh extracted stream URL once automatically
-            if (!probe.ok && (probe.status === 403 || probe.status === 404 || probe.status === 410)) {
-              if (retriedFreshStreamRef.current !== embed._id) {
-                retriedFreshStreamRef.current = embed._id;
-                const refreshed = await api.refreshEmbedMetadata(embed._id).catch(() => null);
-                if (!cancelled && refreshed?.success && refreshed.embed?.directMediaUrl) {
-                  setEmbed(refreshed.embed);
-                  updateSingleEmbedInCache(refreshed.embed);
-                  return;
-                }
-              }
-              setPreviewError('Remote stream token expired or blocked by upstream host. Try refreshing metadata or opening the original source.');
-              setIsBuffering(false);
+            if (!probe.ok || probe.looksLikeHtml || probe.status >= 400) {
+              advancePreviewStrategy();
               return;
             }
-
-            if (probe.isHls || /\.m3u8(\?|$)/i.test(rawStream)) {
-              attachHls(proxiedSrc, true);
+            if (probe.isHls || /\.m3u8(\?|$)/i.test(effectiveDirectStream)) {
+              attachHls(targetSrc);
               return;
             }
           }
         } catch {
-          // Fall back to direct proxied <video> attachment below
+          // Proceed with standard attachment below
         }
 
         if (cancelled) return;
-        if (/\.m3u8(\?|$)/i.test(rawStream)) {
-          attachHls(proxiedSrc, true);
+        if (/\.m3u8(\?|$)/i.test(effectiveDirectStream)) {
+          attachHls(targetSrc);
         } else {
-          videoEl.src = proxiedSrc;
+          videoEl.src = targetSrc;
           videoEl.load();
         }
       })();
@@ -304,7 +466,14 @@ export default function EmbedWatchPage() {
         hlsRef.current = null;
       }
     };
-  }, [activeMode, embed?._id, embed?.directMediaUrl, embed?.sourceUrl, useProxyForPreview]);
+  }, [
+    activeMode,
+    effectiveDirectStream,
+    currentStrategy,
+    embed?.embedUrl,
+    embed?.sourceUrl,
+    advancePreviewStrategy,
+  ]);
 
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -353,6 +522,12 @@ export default function EmbedWatchPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeMode]);
+
+  const sendEmbedCmd = (cmd: string, delta?: number) => {
+    try {
+      embedIframeRef.current?.contentWindow?.postMessage({ type: 'VAULT_EMBED_CMD', cmd, delta }, '*');
+    } catch {}
+  };
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -405,11 +580,60 @@ export default function EmbedWatchPage() {
   };
 
   const toggleFullscreen = () => {
-    if (!containerRef.current) return;
+    const targetEl = activeMode === 'preview' ? containerRef.current : embedContainerRef.current;
+    if (!targetEl) return;
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     } else {
-      containerRef.current.requestFullscreen?.().catch(() => {});
+      targetEl.requestFullscreen?.().catch(() => {});
+    }
+  };
+
+  // Pure Client-Side Download Handler (zero server involvement for file streaming)
+  const handleClientDownload = async () => {
+    if (!embed) return;
+    const targetUrl = effectiveDirectStream;
+    if (!targetUrl) {
+      showToast('Play the video in Safe Proxy Embed or click Refresh first to detect its downloadable video stream.');
+      return;
+    }
+
+    if (isDownloadingClient) {
+      downloadAbortRef.current?.abort();
+      setIsDownloadingClient(false);
+      setDownloadProgress(null);
+      return;
+    }
+
+    setDownloadCorsFallbackUrl(null);
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
+    setIsDownloadingClient(true);
+
+    try {
+      const res = await downloadVideoOnClient({
+        url: targetUrl,
+        title: embed.title,
+        signal: controller.signal,
+        onProgress: (p) => setDownloadProgress(p),
+      });
+      showToast(`Downloaded "${res.filename}" directly in browser!`);
+      setTimeout(() => setDownloadProgress(null), 3500);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        showToast('Download canceled');
+        setDownloadProgress(null);
+      } else if (err instanceof ClientDownloadCorsError) {
+        setDownloadProgress(null);
+        setDownloadCorsFallbackUrl(targetUrl);
+        showToast('CDN blocked browser JS fetch — use the Direct CDN Save link below to download on client.');
+      } else {
+        setDownloadProgress(null);
+        showToast(err?.message || 'Client download failed');
+      }
+    } finally {
+      setIsDownloadingClient(false);
+      downloadAbortRef.current = null;
     }
   };
 
@@ -457,9 +681,9 @@ export default function EmbedWatchPage() {
           canvas = c;
         }
       }
-      if (!canvas && embed.directMediaUrl) {
+      if (!canvas && effectiveDirectStream) {
         const refQuery = embed.sourceUrl ? `&ref=${encodeURIComponent(embed.sourceUrl)}` : '';
-        const proxied = `/api/stream-proxy?url=${encodeURIComponent(embed.directMediaUrl)}${refQuery}`;
+        const proxied = `/api/stream-proxy?url=${encodeURIComponent(effectiveDirectStream)}${refQuery}`;
         canvas = await extractRealVideoFrameCanvas(proxied, currentTime > 0 ? currentTime : 3);
       }
       if (!canvas) {
@@ -497,7 +721,9 @@ export default function EmbedWatchPage() {
       if (res?.success && res.embed) {
         setEmbed(res.embed);
         updateSingleEmbedInCache(res.embed);
-        showToast('Metadata and thumbnail refreshed');
+        setPreviewStrategyIndex(0);
+        setPreviewError('');
+        showToast('Metadata and stream links refreshed');
       }
     } catch (err: any) {
       showToast(err?.message || 'Failed to refresh metadata');
@@ -546,6 +772,8 @@ export default function EmbedWatchPage() {
       if (res?.success && res.embed) {
         setEmbed(res.embed);
         updateSingleEmbedInCache(res.embed);
+        setPreviewStrategyIndex(0);
+        setPreviewError('');
         setShowEditModal(false);
         showToast('Embed details saved');
       }
@@ -599,17 +827,20 @@ export default function EmbedWatchPage() {
     );
   }
 
-  const hasEmbedPlayer = Boolean(embed.embedUrl && !isSamePageUrl(embed.embedUrl, embed.sourceUrl));
-  const iframeTarget = hasEmbedPlayer ? embed.embedUrl! : '';
-  const hasDirectPreview = Boolean(embed.directMediaUrl);
+  const hasDirectPreview = Boolean(effectiveDirectStream);
+  const officialIframe = isOfficialTrustedIframe(embedTargetUrl);
+  const activeEmbedIframeSrc =
+    embedSubMode === 'proxy'
+      ? `/api/embed-proxy?url=${encodeURIComponent(embedTargetUrl)}&ref=${encodeURIComponent(embed.sourceUrl)}`
+      : embedTargetUrl;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#090A0F] text-[#F4F5F8]">
       <Navbar />
 
       {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 p-3.5 bg-[#191D29] border border-indigo-500/40 text-indigo-200 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold animate-fade-in">
-          <Check className="w-4 h-4 text-emerald-400" />
+        <div className="fixed bottom-6 right-6 z-50 p-3.5 bg-[#191D29] border border-indigo-500/40 text-indigo-200 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold animate-fade-in max-w-sm">
+          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMsg}</span>
         </div>
       )}
@@ -700,7 +931,7 @@ export default function EmbedWatchPage() {
       )}
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5">
-        {/* Top Breadcrumb + Mode Switcher */}
+        {/* Top Breadcrumb + Mode Switcher + Dedicated Original Link */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link
             href="/embeds"
@@ -711,28 +942,17 @@ export default function EmbedWatchPage() {
             <span>Back to Embed Videos</span>
           </Link>
 
-          <div className="flex items-center gap-2">
-            {/* Switch between Embed Mode & Direct Preview Mode */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Switch between Direct Preview & Embed Mode (Embed Mode is always available as fallback) */}
             <div className="flex items-center p-0.5 bg-[#131620] border border-white/[0.08] rounded-lg text-xs">
-              {hasEmbedPlayer && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveMode('embed');
-                    setEmbedLoaded(false);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    activeMode === 'embed' ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Tv className="w-3.5 h-3.5" />
-                  <span>Embed Mode</span>
-                </button>
-              )}
               {hasDirectPreview && (
                 <button
                   type="button"
-                  onClick={() => setActiveMode('preview')}
+                  onClick={() => {
+                    setPreviewStrategyIndex(0);
+                    setPreviewError('');
+                    setActiveMode('preview');
+                  }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     activeMode === 'preview' ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-white'
                   }`}
@@ -741,13 +961,28 @@ export default function EmbedWatchPage() {
                   <span>Direct Preview</span>
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveMode('embed');
+                  setEmbedLoaded(false);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  activeMode === 'embed' ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Tv className="w-3.5 h-3.5" />
+                <span>Embed Mode</span>
+              </button>
             </div>
 
+            {/* Dedicated Original Source link — only opens when user explicitly clicks this button */}
             <a
               href={embed.sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[#131620] hover:bg-[#191D29] border border-white/[0.08] text-slate-200 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0"
+              title="Open original page in a new tab"
             >
               <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
               <span className="hidden sm:inline">Original Source</span>
@@ -756,90 +991,173 @@ export default function EmbedWatchPage() {
         </div>
 
         {/* Player Stage */}
-        {activeMode === 'embed' && hasEmbedPlayer ? (
-          <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-white/[0.08] shadow-2xl group">
-            {!embedLoaded && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#090A0F]/90 gap-3 pointer-events-none">
-                <div className="w-9 h-9 border-2 border-white/20 border-t-indigo-400 rounded-full animate-spin" />
-                <span className="text-xs font-medium text-slate-400">
-                  Loading {embed.platform} embed player...
-                </span>
-              </div>
-            )}
-            <iframe
-              key={`${embed._id}-${embedKey}`}
-              src={iframeTarget}
-              onLoad={() => setEmbedLoaded(true)}
-              className="w-full h-full border-0"
-              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              allowFullScreen
-              referrerPolicy="no-referrer-when-downgrade"
-              title={embed.title}
-            />
-            <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-              <button
-                type="button"
-                onClick={() => {
-                  setEmbedLoaded(false);
-                  setEmbedKey((k) => k + 1);
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/80 hover:bg-black text-slate-200 hover:text-white border border-white/15 text-[11px] font-medium backdrop-blur-md cursor-pointer"
-              >
-                <RefreshCw className="w-3 h-3 text-indigo-400" />
-                <span>Reload Embed</span>
-              </button>
-              {hasDirectPreview && (
-                <button
-                  type="button"
-                  onClick={() => setActiveMode('preview')}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/80 hover:bg-black text-slate-200 hover:text-white border border-white/15 text-[11px] font-medium backdrop-blur-md cursor-pointer"
-                >
-                  <Play className="w-3 h-3 text-emerald-400" />
-                  <span>Direct Preview</span>
-                </button>
+        {activeMode === 'embed' ? (
+          <div
+            ref={embedContainerRef}
+            className={
+              isFullscreen
+                ? 'w-screen h-screen bg-black flex flex-col overflow-hidden select-none'
+                : 'w-full bg-black rounded-xl overflow-hidden border border-white/[0.08] shadow-2xl flex flex-col select-none'
+            }
+          >
+            {/* Bounded Iframe Viewport */}
+            <div
+              className={
+                isFullscreen
+                  ? 'relative flex-1 w-full overflow-hidden bg-black flex items-center justify-center'
+                  : 'relative w-full aspect-video max-h-[75vh] overflow-hidden bg-black flex items-center justify-center'
+              }
+            >
+              {!embedLoaded && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#090A0F]/95 gap-3 pointer-events-none">
+                  <div className="w-9 h-9 border-2 border-white/20 border-t-indigo-400 rounded-full animate-spin" />
+                  <span className="text-xs font-medium text-slate-300">
+                    {embedSubMode === 'proxy'
+                      ? `Loading ${embed.platform} in Safe In-App Embed Proxy...`
+                      : `Loading ${embed.platform} embed player...`}
+                  </span>
+                </div>
               )}
+
+              <iframe
+                ref={embedIframeRef}
+                key={`${embed._id}-${embedSubMode}-${embedKey}`}
+                src={activeEmbedIframeSrc}
+                onLoad={() => setEmbedLoaded(true)}
+                className="w-full h-full max-w-full max-h-full border-0 block"
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                allowFullScreen
+                referrerPolicy="no-referrer-when-downgrade"
+                {...(embedSubMode === 'proxy' || !officialIframe
+                  ? { sandbox: 'allow-scripts allow-same-origin allow-forms allow-presentation' }
+                  : {})}
+                title={embed.title}
+              />
             </div>
-          </div>
-        ) : !hasDirectPreview ? (
-          <div className="relative w-full aspect-video bg-[#0C0E15] rounded-xl overflow-hidden border border-white/[0.08] shadow-2xl flex items-center justify-center p-6 text-center">
-            <div className="max-w-md space-y-3">
-              <AlertCircle className="w-9 h-9 text-amber-400 mx-auto" />
-              <h3 className="text-sm font-semibold text-white">No Embed Player or Direct Stream Found</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                {embed.platform || embed.sourceDomain} blocked automated extraction or does not expose a standalone iframe player. You can refresh metadata, paste a direct/embed URL in Edit Details, or open the original source.
-              </p>
-              <div className="flex flex-wrap justify-center gap-2 pt-1">
+
+            {/* Integrated Player Control Bar for Embed Mode */}
+            <div className="bg-[#0C0E15] border-t border-white/[0.08] px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                {/* Interactive playback controls wired directly to any HTML5 video inside Safe Proxy Embed */}
+                {embedSubMode === 'proxy' && embedVideoState.hasVideo && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => sendEmbedCmd('togglePlay')}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg font-medium cursor-pointer"
+                      aria-label={embedVideoState.paused ? 'Play' : 'Pause'}
+                    >
+                      {embedVideoState.paused ? (
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      ) : (
+                        <Pause className="w-3.5 h-3.5" />
+                      )}
+                      <span>{embedVideoState.paused ? 'Play' : 'Pause'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => sendEmbedCmd('seekBy', -10)}
+                      className="p-1.5 bg-[#131620] hover:bg-[#191D29] border border-white/[0.08] text-slate-300 hover:text-white rounded-lg cursor-pointer"
+                      title="Back 10s"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => sendEmbedCmd('seekBy', 10)}
+                      className="p-1.5 bg-[#131620] hover:bg-[#191D29] border border-white/[0.08] text-slate-300 hover:text-white rounded-lg cursor-pointer"
+                      title="Forward 10s"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => sendEmbedCmd('toggleMute')}
+                      className="p-1.5 bg-[#131620] hover:bg-[#191D29] border border-white/[0.08] text-slate-300 hover:text-white rounded-lg cursor-pointer"
+                      title={embedVideoState.muted ? 'Unmute' : 'Mute'}
+                    >
+                      {embedVideoState.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    </button>
+                    {embedVideoState.duration > 0 && (
+                      <span className="font-mono text-[11px] text-slate-400 tabular-nums px-1">
+                        {formatTime(embedVideoState.currentTime)} / {formatTime(embedVideoState.duration)}
+                      </span>
+                    )}
+                  </>
+                )}
+
                 <button
                   type="button"
-                  onClick={handleRefreshMetadata}
-                  disabled={isRefreshing}
-                  className="px-3.5 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg cursor-pointer"
+                  onClick={() => {
+                    setEmbedLoaded(false);
+                    setEmbedKey((k) => k + 1);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#131620] hover:bg-[#191D29] text-slate-200 border border-white/[0.08] text-[11px] font-medium cursor-pointer"
                 >
-                  {isRefreshing ? 'Refreshing...' : 'Re-fetch Stream'}
+                  <RefreshCw className="w-3 h-3 text-indigo-400" />
+                  <span>Reload Embed</span>
                 </button>
+
+                {/* Manual toggle between Direct Iframe and Safe Proxy Embed fallback */}
                 <button
                   type="button"
-                  onClick={handleOpenEdit}
-                  className="px-3.5 py-2 bg-[#191D29] text-slate-200 border border-white/10 text-xs font-semibold rounded-lg cursor-pointer"
+                  onClick={() => {
+                    setEmbedLoaded(false);
+                    setEmbedSubMode((m) => (m === 'proxy' ? 'direct' : 'proxy'));
+                    setEmbedKey((k) => k + 1);
+                  }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium cursor-pointer transition-colors ${
+                    embedSubMode === 'proxy'
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                      : 'bg-[#131620] hover:bg-[#191D29] border-white/[0.08] text-slate-300'
+                  }`}
+                  title={
+                    embedFrameReason
+                      ? `Direct iframe blocked by ${embedFrameReason}; using Safe In-App Proxy`
+                      : 'Switch between direct iframe and safe in-app proxy embed'
+                  }
                 >
-                  Edit URLs
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{embedSubMode === 'proxy' ? 'Safe Proxy Active' : 'Try Safe Proxy Fallback'}</span>
                 </button>
-                <a
-                  href={embed.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3.5 py-2 bg-[#191D29] text-slate-200 border border-white/10 text-xs font-semibold rounded-lg"
+              </div>
+
+              <div className="flex items-center gap-2">
+                {hasDirectPreview && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewStrategyIndex(0);
+                      setPreviewError('');
+                      setActiveMode('preview');
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-indigo-300 text-[11px] font-semibold cursor-pointer"
+                  >
+                    <Play className="w-3 h-3 fill-current" />
+                    <span>Direct Preview Ready</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="p-1.5 rounded-lg bg-[#131620] hover:bg-[#191D29] border border-white/[0.08] text-slate-300 hover:text-white cursor-pointer"
+                  aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen embed'}
                 >
-                  Open Original
-                </a>
+                  {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                </button>
               </div>
             </div>
           </div>
         ) : (
-          /* Link-Downloader Style Direct Video Preview Player */
+          /* Direct Preview Player — Strictly Contained Within Player Window */
           <div
             ref={containerRef}
-            className="relative w-full aspect-video max-h-[82vh] bg-black rounded-xl overflow-hidden border border-white/[0.08] shadow-2xl group select-none"
+            className={
+              isFullscreen
+                ? 'relative w-screen h-screen bg-black overflow-hidden flex items-center justify-center select-none'
+                : 'relative w-full aspect-video max-h-[75vh] bg-black rounded-xl overflow-hidden border border-white/[0.08] shadow-2xl group flex items-center justify-center select-none'
+            }
           >
             <video
               ref={videoRef}
@@ -866,14 +1184,9 @@ export default function EmbedWatchPage() {
               onWaiting={() => setIsBuffering(true)}
               onCanPlay={() => setIsBuffering(false)}
               onError={() => {
-                if (!useProxyForPreview) {
-                  setUseProxyForPreview(true);
-                } else {
-                  setIsBuffering(false);
-                  setPreviewError('Stream blocked by remote host CORS/hotlink protection or expired token. Try Re-fetch Stream or open the original source.');
-                }
+                advancePreviewStrategy();
               }}
-              className="absolute inset-0 w-full h-full object-contain cursor-pointer"
+              className="w-full h-full max-w-full max-h-full object-contain cursor-pointer block"
             />
 
             {/* Centered Play Button Overlay when paused */}
@@ -897,42 +1210,47 @@ export default function EmbedWatchPage() {
             )}
 
             {previewError && (
-              <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/85 p-6 text-center">
-                <div className="max-w-md bg-[#131620] border border-amber-500/30 rounded-2xl p-6 space-y-3">
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/90 p-4 sm:p-6 text-center">
+                <div className="max-w-md bg-[#131620] border border-amber-500/30 rounded-2xl p-5 sm:p-6 space-y-3.5 shadow-2xl">
                   <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
                   <p className="text-xs text-slate-300 leading-relaxed">{previewError}</p>
                   <div className="flex flex-wrap justify-center gap-2">
-                    {hasEmbedPlayer && (
-                      <button
-                        type="button"
-                        onClick={() => setActiveMode('embed')}
-                        className="px-3.5 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg cursor-pointer"
-                      >
-                        Switch to Embed Mode
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveMode('embed');
+                        setEmbedLoaded(false);
+                      }}
+                      className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg cursor-pointer"
+                    >
+                      Switch to Embed Mode
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveMode('embed');
+                        setEmbedSubMode('proxy');
+                        setEmbedLoaded(false);
+                        setEmbedKey((k) => k + 1);
+                      }}
+                      className="px-3.5 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-semibold rounded-lg cursor-pointer"
+                    >
+                      Safe Proxy Fallback
+                    </button>
                     <button
                       type="button"
                       onClick={handleRefreshMetadata}
                       disabled={isRefreshing}
-                      className="px-3.5 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg cursor-pointer"
+                      className="px-3.5 py-2 bg-[#191D29] hover:bg-white/[0.08] border border-white/10 text-slate-200 text-xs font-semibold rounded-lg cursor-pointer"
                     >
                       {isRefreshing ? 'Refreshing...' : 'Re-fetch Stream'}
                     </button>
-                    <a
-                      href={embed.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3.5 py-2 bg-[#191D29] text-slate-200 border border-white/10 text-xs font-semibold rounded-lg"
-                    >
-                      Open Original
-                    </a>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Controls Bar — overlaid inside bottom edge so video stays dead-center and controls are always visible */}
+            {/* Controls Bar — overlaid inside bottom edge */}
             <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/75 to-transparent px-4 pt-10 pb-3 space-y-2">
               <input
                 type="range"
@@ -1003,25 +1321,85 @@ export default function EmbedWatchPage() {
           </div>
         )}
 
-        {/* Helpful info banner when an external host might block iframe embedding */}
-        {activeMode === 'embed' && hasEmbedPlayer && (
+        {/* Helpful Info Strip */}
+        {activeMode === 'embed' && (
           <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-[#131620] border border-white/[0.06] rounded-xl text-xs text-slate-400">
             <span className="flex items-center gap-2">
               <Globe className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
               <span>
-                Playing from <strong className="text-slate-200 font-medium">{embed.sourceDomain || embed.platform}</strong> in Embed Mode.
-                {hasDirectPreview ? ' You can also switch to Direct Preview Mode anytime.' : ' If a site blocks iframe embedding, use Original Source.'}
+                Playing <strong className="text-slate-200 font-medium">{embed.sourceDomain || embed.platform}</strong> inside Vault
+                {embedSubMode === 'proxy' ? ' (Safe Proxy Fallback active)' : ' (Direct Embed)'}.
               </span>
             </span>
             {hasDirectPreview && (
               <button
                 type="button"
-                onClick={() => setActiveMode('preview')}
+                onClick={() => {
+                  setPreviewStrategyIndex(0);
+                  setPreviewError('');
+                  setActiveMode('preview');
+                }}
                 className="text-indigo-300 hover:text-indigo-200 font-semibold whitespace-nowrap cursor-pointer"
               >
                 Switch to Direct Preview →
               </button>
             )}
+          </div>
+        )}
+
+        {/* Client Download Progress Banner */}
+        {(downloadProgress || downloadCorsFallbackUrl) && (
+          <div className="p-3.5 bg-[#131620] border border-emerald-500/30 rounded-xl space-y-2 text-xs">
+            {downloadProgress ? (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-emerald-300 flex items-center gap-2">
+                    <Download className="w-4 h-4 animate-bounce" />
+                    <span>{downloadProgress.label}</span>
+                  </span>
+                  {isDownloadingClient && (
+                    <button
+                      type="button"
+                      onClick={handleClientDownload}
+                      className="px-2.5 py-1 rounded bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 text-[11px] font-medium cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+                <div className="w-full h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-400 transition-all duration-150"
+                    style={{ width: `${Math.max(5, downloadProgress.percent)}%` }}
+                  />
+                </div>
+              </>
+            ) : downloadCorsFallbackUrl ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-slate-300">
+                  Remote CDN restricted JS fetch CORS. Save the raw stream file directly from your browser:
+                </span>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={downloadCorsFallbackUrl}
+                    download={sanitizeDownloadFilename(embed.title)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-lg flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Direct CDN Save</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setDownloadCorsFallbackUrl(null)}
+                    className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -1065,6 +1443,23 @@ export default function EmbedWatchPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Pure Client-Side Download Button */}
+              <button
+                type="button"
+                onClick={handleClientDownload}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                  isDownloadingClient
+                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                    : hasDirectPreview
+                      ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300'
+                      : 'bg-[#191D29] hover:bg-white/[0.08] border-white/[0.08] text-slate-300'
+                }`}
+                title="Download video directly in your browser (client-side)"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{isDownloadingClient ? 'Downloading...' : 'Download'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleToggleFavorite}

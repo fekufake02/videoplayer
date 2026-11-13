@@ -1544,12 +1544,14 @@ export async function GET(
     return NextResponse.redirect(resolvedStream);
   }
 
-  // 8.05 Same-Origin CORS & Range Streaming Proxy: /api/stream-proxy?url=...&ref=...&probe=1
+  // 8.05 Same-Origin CORS & Range Streaming Proxy: /api/stream-proxy?url=...&ref=...&probe=1&noRef=1
   // Ensures mpegts.js / hls.js / offscreen frame capture and hotlink-protected external streams work cleanly
   if (path === 'stream-proxy') {
     const targetUrlParam = req.nextUrl.searchParams.get('url');
     const refParam = req.nextUrl.searchParams.get('ref');
     const isProbe = req.nextUrl.searchParams.get('probe') === '1';
+    const noRef = req.nextUrl.searchParams.get('noRef') === '1';
+    const sendOrigin = req.nextUrl.searchParams.get('sendOrigin') === '1';
 
     if (!targetUrlParam) {
       return new NextResponse('Missing url parameter', { status: 400 });
@@ -1588,7 +1590,7 @@ export async function GET(
 
     let safeReferer: string | undefined;
     let safeOrigin: string | undefined;
-    if (refParam) {
+    if (refParam && !noRef) {
       try {
         const refUrl = new URL(refParam);
         if ((refUrl.protocol === 'https:' || refUrl.protocol === 'http:') && !isBlockedHost(refUrl.hostname)) {
@@ -1606,11 +1608,13 @@ export async function GET(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       Accept: '*/*',
       'Accept-Language': 'en-US,en;q=0.9',
+      'Sec-Fetch-Dest': 'video',
+      'Sec-Fetch-Mode': 'no-cors',
     };
-    if (safeReferer) {
+    if (safeReferer && !noRef) {
       upstreamHeaders['Referer'] = safeReferer;
     }
-    if (safeOrigin) {
+    if (safeOrigin && sendOrigin && !noRef) {
       upstreamHeaders['Origin'] = safeOrigin;
     }
     if (rangeHeader && !isProbe) {
@@ -1640,7 +1644,7 @@ export async function GET(
           if (reader) {
             const { value } = await reader.read();
             if (value) {
-              headSnippet = new TextDecoder('utf-8', { fatal: false }).decode(value.slice(0, 256));
+              headSnippet = new TextDecoder('utf-8', { fatal: false }).decode(value.slice(0, 512));
             }
             await reader.cancel().catch(() => {});
           }
@@ -1648,6 +1652,8 @@ export async function GET(
           // Ignore probe read errors
         }
         const looksLikeM3u8Text = headSnippet.trimStart().startsWith('#EXTM3U');
+        const looksLikeHtml =
+          rawCt.includes('text/html') || /^\s*<!doctype\s+html|^\s*<html/i.test(headSnippet);
         const isHls =
           looksLikeM3u8Text ||
           rawCt.includes('mpegurl') ||
@@ -1656,10 +1662,11 @@ export async function GET(
 
         return NextResponse.json(
           {
-            ok: upstreamResp.ok,
-            status: upstreamResp.status,
+            ok: upstreamResp.ok && !looksLikeHtml,
+            status: looksLikeHtml ? 415 : upstreamResp.status,
             contentType: isHls ? 'application/vnd.apple.mpegurl' : rawCt || 'video/mp4',
             isHls,
+            looksLikeHtml,
             finalUrl,
           },
           {
@@ -1686,7 +1693,11 @@ export async function GET(
           const rewriteTarget = (rawRef: string) => {
             try {
               const abs = new URL(rawRef.trim(), finalUrl).toString();
-              const refSuffix = safeReferer ? `&ref=${encodeURIComponent(safeReferer)}` : '';
+              const refSuffix = noRef
+                ? '&noRef=1'
+                : safeReferer
+                  ? `&ref=${encodeURIComponent(safeReferer)}`
+                  : '';
               return `/api/stream-proxy?url=${encodeURIComponent(abs)}${refSuffix}`;
             } catch {
               return rawRef;
@@ -1765,6 +1776,304 @@ export async function GET(
         return new NextResponse(null, { status: 499 });
       }
       return new NextResponse('Upstream stream unavailable', { status: 502 });
+    }
+  }
+
+  // 8.06 Check if an external embed URL permits iframe embedding: /api/embed-check?url=...
+  if (path === 'embed-check') {
+    const targetUrlParam = req.nextUrl.searchParams.get('url');
+    if (!targetUrlParam) {
+      return NextResponse.json({ frameable: false, reason: 'Missing url' }, { status: 400 });
+    }
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(targetUrlParam);
+    } catch {
+      return NextResponse.json({ frameable: false, reason: 'Invalid url' }, { status: 400 });
+    }
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      return NextResponse.json({ frameable: false, reason: 'Invalid protocol' }, { status: 400 });
+    }
+    const h = parsedUrl.hostname.toLowerCase();
+    if (
+      h === 'localhost' ||
+      h === '::1' ||
+      h === '[::1]' ||
+      h.startsWith('127.') ||
+      h.startsWith('10.') ||
+      h.startsWith('192.168.') ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)
+    ) {
+      return NextResponse.json({ frameable: false, reason: 'Forbidden host' }, { status: 403 });
+    }
+
+    // Known iframe-friendly official video providers
+    if (/youtube\.com|youtu\.be|player\.vimeo\.com|vimeo\.com|dailymotion\.com|streamable\.com|loom\.com|drive\.google\.com|player\.twitch\.tv/i.test(h)) {
+      return NextResponse.json({ frameable: true, finalUrl: parsedUrl.toString() });
+    }
+
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3500);
+      let resp = await fetch(parsedUrl.toString(), {
+        method: 'HEAD',
+        redirect: 'follow',
+        signal: ctrl.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+      });
+      if (resp.status === 405 || resp.status === 403) {
+        resp = await fetch(parsedUrl.toString(), {
+          method: 'GET',
+          redirect: 'follow',
+          signal: ctrl.signal,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          },
+        });
+        await resp.body?.cancel().catch(() => {});
+      }
+      clearTimeout(timer);
+
+      const xfo = (resp.headers.get('x-frame-options') || '').toLowerCase();
+      const csp = (resp.headers.get('content-security-policy') || '').toLowerCase();
+      const cspMatch = csp.match(/frame-ancestors\s+([^;]+)/i);
+      const blockedByXfo = xfo.includes('deny') || xfo.includes('sameorigin');
+      const blockedByCsp = cspMatch
+        ? !cspMatch[1].includes('*') &&
+          (/self|none/i.test(cspMatch[1]) || !cspMatch[1].includes('https:'))
+        : false;
+
+      return NextResponse.json({
+        frameable: !blockedByXfo && !blockedByCsp && resp.status < 400,
+        status: resp.status,
+        reason: blockedByXfo ? 'X-Frame-Options' : blockedByCsp ? 'CSP frame-ancestors' : undefined,
+        finalUrl: resp.url || parsedUrl.toString(),
+      });
+    } catch {
+      return NextResponse.json({ frameable: true, finalUrl: parsedUrl.toString() });
+    }
+  }
+
+  // 8.07 In-App Safe Embed Proxy: /api/embed-proxy?url=...&ref=...
+  // Strips X-Frame-Options / CSP frame-ancestors so refused sites play inside our app iframe,
+  // blocks popup tabs / top-frame escapes, and forwards media stream discovery + controls via postMessage.
+  if (path === 'embed-proxy') {
+    const targetUrlParam = req.nextUrl.searchParams.get('url');
+    const refParam = req.nextUrl.searchParams.get('ref');
+    if (!targetUrlParam) {
+      return new NextResponse('Missing url parameter', { status: 400 });
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(targetUrlParam);
+    } catch {
+      return new NextResponse('Invalid url parameter', { status: 400 });
+    }
+
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      return new NextResponse('Unsupported protocol', { status: 400 });
+    }
+
+    const isBlockedHost = (hostname: string) => {
+      const h = hostname.toLowerCase();
+      return (
+        h === 'localhost' ||
+        h === '::1' ||
+        h === '[::1]' ||
+        h.endsWith('.local') ||
+        h.endsWith('.internal') ||
+        h.startsWith('127.') ||
+        h.startsWith('10.') ||
+        h.startsWith('192.168.') ||
+        h.startsWith('169.254.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)
+      );
+    };
+
+    if (isBlockedHost(parsedUrl.hostname)) {
+      return new NextResponse('Forbidden host', { status: 403 });
+    }
+
+    const reqHeaders: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    };
+    if (refParam) {
+      try {
+        const refUrl = new URL(refParam);
+        if ((refUrl.protocol === 'https:' || refUrl.protocol === 'http:') && !isBlockedHost(refUrl.hostname)) {
+          reqHeaders['Referer'] = refUrl.toString();
+        }
+      } catch {}
+    }
+
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 10000);
+      const upstream = await fetch(parsedUrl.toString(), {
+        method: 'GET',
+        redirect: 'follow',
+        headers: reqHeaders,
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+
+      const finalUrl = upstream.url || parsedUrl.toString();
+      if (isBlockedHost(new URL(finalUrl).hostname)) {
+        return new NextResponse('Forbidden redirect host', { status: 403 });
+      }
+
+      const ctype = (upstream.headers.get('content-type') || '').toLowerCase();
+      if (!ctype.includes('text/html') && !ctype.includes('application/xhtml') && ctype) {
+        const passHeaders = new Headers();
+        passHeaders.set('Content-Type', ctype);
+        passHeaders.set('Access-Control-Allow-Origin', '*');
+        return new NextResponse(upstream.body, {
+          status: upstream.status,
+          headers: passHeaders,
+        });
+      }
+
+      let html = await upstream.text();
+      const escapedBase = finalUrl.replace(/"/g, '&quot;');
+
+      // Strip meta CSP / frame-blocking tags & target="_blank" attributes
+      html = html
+        .replace(/<meta[^>]+http-equiv=["']?(?:content-security-policy|x-frame-options|refresh)["']?[^>]*>/gi, '')
+        .replace(/\btarget=["']?_blank["']?/gi, 'target="_self"')
+        .replace(/<base[^>]*>/gi, '');
+
+      const bridgeScript = `
+<base href="${escapedBase}" target="_self" />
+<style id="vault-embed-fit-style">
+  html, body { background: #000 !important; }
+  video { max-width: 100% !important; max-height: 100vh !important; object-fit: contain !important; }
+</style>
+<script>
+(function() {
+  try {
+    // 1. Neutralize popup ads and external redirects inside embed player
+    window.open = function() { return null; };
+    document.addEventListener('click', function(e) {
+      var a = e.target && e.target.closest ? e.target.closest('a') : null;
+      if (a && a.href && !a.closest('video')) {
+        var isNav = a.getAttribute('target') === '_blank' || /^https?:/.test(a.href);
+        if (isNav) { e.preventDefault(); e.stopPropagation(); }
+      }
+    }, true);
+
+    var reported = {};
+    function reportMedia(url) {
+      if (!url || typeof url !== 'string') return;
+      if (/^(blob:|data:|javascript:)/i.test(url)) return;
+      if (!/\\.(mp4|m3u8|webm|mov|m4v)(\\?|$)|\\/get_file\\/|mime=video/i.test(url)) return;
+      if (reported[url]) return;
+      reported[url] = true;
+      try {
+        window.parent.postMessage({ type: 'VAULT_EMBED_MEDIA_DISCOVERED', url: url, pageUrl: '${escapedBase}' }, '*');
+      } catch (err) {}
+    }
+
+    function scanVideos() {
+      var vids = document.querySelectorAll('video');
+      for (var i = 0; i < vids.length; i++) {
+        var v = vids[i];
+        if (v.currentSrc) reportMedia(v.currentSrc);
+        if (v.src) reportMedia(v.src);
+        var sources = v.querySelectorAll('source');
+        for (var j = 0; j < sources.length; j++) {
+          if (sources[j].src) reportMedia(sources[j].src);
+        }
+      }
+    }
+
+    // Hook fetch & XHR to capture dynamically fetched .m3u8/.mp4 URLs
+    var origFetch = window.fetch;
+    if (origFetch) {
+      window.fetch = function(input) {
+        try {
+          var u = typeof input === 'string' ? input : (input && input.url);
+          if (u) reportMedia(new URL(u, '${escapedBase}').toString());
+        } catch (e) {}
+        return origFetch.apply(this, arguments);
+      };
+    }
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      try {
+        if (url) reportMedia(new URL(String(url), '${escapedBase}').toString());
+      } catch (e) {}
+      return origOpen.apply(this, arguments);
+    };
+
+    // Broadcast active video state and respond to parent player controls
+    function getPrimaryVideo() {
+      var vids = document.querySelectorAll('video');
+      return vids.length > 0 ? vids[0] : null;
+    }
+
+    setInterval(function() {
+      scanVideos();
+      var v = getPrimaryVideo();
+      if (v) {
+        try {
+          window.parent.postMessage({
+            type: 'VAULT_EMBED_STATE',
+            paused: v.paused,
+            muted: v.muted,
+            currentTime: v.currentTime || 0,
+            duration: v.duration || 0
+          }, '*');
+        } catch (e) {}
+      }
+    }, 800);
+
+    window.addEventListener('message', function(ev) {
+      var data = ev.data || {};
+      if (data.type !== 'VAULT_EMBED_CMD') return;
+      var v = getPrimaryVideo();
+      if (!v) return;
+      if (data.cmd === 'play') v.play && v.play().catch(function(){});
+      else if (data.cmd === 'pause') v.pause && v.pause();
+      else if (data.cmd === 'togglePlay') {
+        if (v.paused) v.play && v.play().catch(function(){});
+        else v.pause && v.pause();
+      } else if (data.cmd === 'seekBy' && typeof data.delta === 'number') {
+        v.currentTime = Math.max(0, Math.min(v.duration || 999999, (v.currentTime || 0) + data.delta));
+      } else if (data.cmd === 'toggleMute') {
+        v.muted = !v.muted;
+      }
+    });
+  } catch (err) {}
+})();
+</script>`;
+
+      if (/<head[^>]*>/i.test(html)) {
+        html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${bridgeScript}`);
+      } else {
+        html = `${bridgeScript}\n${html}`;
+      }
+
+      return new NextResponse(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    } catch {
+      return new NextResponse(
+        '<!DOCTYPE html><html><body style="margin:0;background:#090A0F;color:#cbd5e1;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;padding:24px"><div><h3 style="margin:0 0 8px;font-size:15px;color:#fff">Could not load proxied embed</h3><p style="margin:0;font-size:12px;color:#94a3b8">Try Direct Preview or Re-fetch Stream.</p></div></body></html>',
+        { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+      );
     }
   }
 
@@ -3211,9 +3520,9 @@ export async function POST(
           const extracted = await extractEmbedMetadata(existing.sourceUrl);
           const setFields: any = {
             playbackType: extracted.playbackType,
-            embedUrl: extracted.embedUrl || null,
             updatedAt: new Date(),
           };
+          if (extracted.embedUrl) setFields.embedUrl = extracted.embedUrl;
           if (extracted.directMediaUrl) setFields.directMediaUrl = extracted.directMediaUrl;
           if (!existing.thumbnailKey && extracted.thumbnailUrl) setFields.thumbnailUrl = extracted.thumbnailUrl;
           if (extracted.duration > 0) setFields.duration = extracted.duration;
@@ -3739,16 +4048,16 @@ export async function HEAD(
       if (isPrivateHost) {
         return new NextResponse(null, { status: 403 });
       }
+      const noRef = req.nextUrl.searchParams.get('noRef') === '1';
       const upstreamHeaders: Record<string, string> = {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       };
-      if (refParam) {
+      if (refParam && !noRef) {
         try {
           const refUrl = new URL(refParam);
           if (refUrl.protocol === 'https:' || refUrl.protocol === 'http:') {
             upstreamHeaders['Referer'] = refUrl.toString();
-            upstreamHeaders['Origin'] = refUrl.origin;
           }
         } catch {}
       }

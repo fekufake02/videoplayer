@@ -43,13 +43,28 @@ function decodeHtmlEntities(input: string): string {
     .trim();
 }
 
+function cleanEscapedMediaUrl(raw: string): string {
+  let cleaned = decodeHtmlEntities(raw).trim();
+  // Strip KVS kt_player obfuscation prefix like function/0/https://...
+  cleaned = cleaned.replace(/^function\/\d+\//i, '');
+  cleaned = cleaned
+    .replace(/\\u002F/gi, '/')
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\\//g, '/')
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+  return cleaned.trim();
+}
+
 function resolveMaybeRelativeUrl(candidate: string | undefined | null, baseUrl: string): string | undefined {
   if (!candidate) return undefined;
-  const trimmed = decodeHtmlEntities(candidate).trim();
-  if (!trimmed || trimmed.startsWith('javascript:') || trimmed.startsWith('data:')) return undefined;
+  const trimmed = cleanEscapedMediaUrl(candidate);
+  if (!trimmed || trimmed.startsWith('javascript:') || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+    return undefined;
+  }
   try {
     const resolved = new URL(trimmed, baseUrl);
     if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return undefined;
+    if (isPrivateOrBlockedHost(resolved.hostname)) return undefined;
     return resolved.toString();
   } catch {
     return undefined;
@@ -138,6 +153,81 @@ function extractJsonLdVideo(html: string): {
   return null;
 }
 
+function scoreMediaCandidate(url: string): number {
+  const lower = url.toLowerCase();
+  if (/\.(jpg|jpeg|png|webp|gif|svg|css|js|vtt|srt)(\?|$)/i.test(lower)) return -100;
+  let score = 10;
+  if (/\.m3u8(\?|$)/i.test(lower)) score += 35;
+  else if (/\.mp4(\?|$)/i.test(lower)) score += 30;
+  else if (/\.(webm|mov|m4v)(\?|$)/i.test(lower)) score += 20;
+  else if (/\/get_file\//i.test(lower)) score += 28;
+
+  if (/1080|fhd|fullhd|hd/i.test(lower)) score += 15;
+  else if (/720/i.test(lower)) score += 10;
+  else if (/480/i.test(lower)) score += 5;
+
+  // Penalize tiny preview/trailer loops if a full source exists
+  if (/preview|_prev\.|trailer|sample|thumb|teaser|sprite/i.test(lower)) score -= 25;
+  return score;
+}
+
+function extractDirectMediaFromHtml(html: string, baseUrl: string): string | undefined {
+  const candidates: string[] = [];
+  const addCandidate = (raw?: string | null) => {
+    if (!raw) return;
+    const resolved = resolveMaybeRelativeUrl(raw, baseUrl);
+    if (resolved) candidates.push(resolved);
+  };
+
+  // 1. Explicit HTML5 <video> / <source> attributes
+  const tagPatterns = [
+    /<source[^>]+src=["']([^"']+)["'][^>]*type=["'](?:application\/x-mpegurl|application\/vnd\.apple\.mpegurl|video\/[^"']+)["'][^>]*>/gi,
+    /<source[^>]+type=["'](?:application\/x-mpegurl|application\/vnd\.apple\.mpegurl|video\/[^"']+)["'][^>]*src=["']([^"']+)["'][^>]*>/gi,
+    /<(?:video|source)[^>]+(?:src|data-src|data-video|data-mp4|data-hls)=["']([^"']+)["'][^>]*>/gi,
+  ];
+  for (const re of tagPatterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      addCandidate(m[1]);
+    }
+  }
+
+  // 2. KVS / flashvars / JS player configs / JSON fields
+  const jsKeyPatterns = [
+    /(?:video_url_hd2|video_url_hd|video_alt_url3|video_alt_url2|video_alt_url|video_url|hlsUrl|hls_url|mp4Url|mp4_url|videoSrc|video_src|streamUrl|stream_url|mediaUrl|media_url|playbackUrl|contentUrl|source_hd|source_sd)\s*[:=]\s*["']([^"']+)["']/gi,
+    /["'](?:file|hls|mp4|hd|sd|high|low|src|url)["']\s*:\s*["']((?:https?:|\/\/|\\\/\\\/|\/get_file\/)[^"']+(?:\.(?:mp4|m3u8|webm|mov|m4v)|\/get_file\/)[^"']*)["']/gi,
+    /(?:file|src)\s*:\s*["']((?:https?:|\/\/|\\\/\\\/|\/get_file\/)[^"']+(?:\.(?:mp4|m3u8|webm|mov|m4v)|\/get_file\/)[^"']*)["']/gi,
+    /["']((?:function\/\d+\/)?(?:https?:\\?\/\\?\/|\/\/)[^"'\s<>]+\.(?:mp4|m3u8|webm)(?:\?[^"'\s<>]*)?)["']/gi,
+    /["'](\/get_file\/[^"'\s<>]+)["']/gi,
+  ];
+  for (const re of jsKeyPatterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      addCandidate(m[1]);
+    }
+  }
+
+  // 3. Base64-encoded stream URLs inside atob("...")
+  const atobRegex = /atob\(\s*["']([A-Za-z0-9+/=]{16,})["']\s*\)/g;
+  let atobMatch: RegExpExecArray | null;
+  while ((atobMatch = atobRegex.exec(html)) !== null) {
+    try {
+      const decoded = Buffer.from(atobMatch[1], 'base64').toString('utf8').trim();
+      if (/^https?:\/\//i.test(decoded) && (DIRECT_VIDEO_EXT_RE.test(decoded) || /\/get_file\/|stream|video/i.test(decoded))) {
+        addCandidate(decoded);
+      }
+    } catch {
+      // Ignore invalid base64
+    }
+  }
+
+  if (candidates.length === 0) return undefined;
+
+  const unique = Array.from(new Set(candidates));
+  unique.sort((a, b) => scoreMediaCandidate(b) - scoreMediaCandidate(a));
+  return scoreMediaCandidate(unique[0]) > -50 ? unique[0] : undefined;
+}
+
 function detectKnownPlatform(parsedUrl: URL): {
   platform: string;
   embedUrl?: string;
@@ -145,6 +235,7 @@ function detectKnownPlatform(parsedUrl: URL): {
   directMediaUrl?: string;
   oEmbedEndpoint?: string;
   defaultTitle?: string;
+  isOfficialIframeProvider?: boolean;
 } {
   const host = parsedUrl.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
   const full = parsedUrl.toString();
@@ -177,6 +268,7 @@ function detectKnownPlatform(parsedUrl: URL): {
         thumbnailUrl: `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`,
         oEmbedEndpoint: `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&format=json`,
         defaultTitle: `YouTube Video (${vidId})`,
+        isOfficialIframeProvider: true,
       };
     }
   }
@@ -189,6 +281,7 @@ function detectKnownPlatform(parsedUrl: URL): {
         embedUrl: `https://player.vimeo.com/video/${m[1]}?autoplay=1`,
         oEmbedEndpoint: `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(`https://vimeo.com/${m[1]}`)}`,
         defaultTitle: `Vimeo Video (${m[1]})`,
+        isOfficialIframeProvider: true,
       };
     }
   }
@@ -202,6 +295,7 @@ function detectKnownPlatform(parsedUrl: URL): {
         thumbnailUrl: `https://www.dailymotion.com/thumbnail/video/${m[1]}`,
         oEmbedEndpoint: `https://www.dailymotion.com/services/oembed?url=${encodeURIComponent(full)}&format=json`,
         defaultTitle: `Dailymotion Video (${m[1]})`,
+        isOfficialIframeProvider: true,
       };
     }
   }
@@ -214,6 +308,7 @@ function detectKnownPlatform(parsedUrl: URL): {
         embedUrl: `https://streamable.com/e/${m[1]}?autoplay=1`,
         oEmbedEndpoint: `https://api.streamable.com/oembed.json?url=${encodeURIComponent(full)}`,
         defaultTitle: `Streamable Video (${m[1]})`,
+        isOfficialIframeProvider: true,
       };
     }
   }
@@ -226,6 +321,7 @@ function detectKnownPlatform(parsedUrl: URL): {
         embedUrl: `https://www.loom.com/embed/${m[1]}`,
         oEmbedEndpoint: `https://www.loom.com/v1/oembed?url=${encodeURIComponent(full)}`,
         defaultTitle: 'Loom Recording',
+        isOfficialIframeProvider: true,
       };
     }
   }
@@ -238,6 +334,7 @@ function detectKnownPlatform(parsedUrl: URL): {
         embedUrl: `https://drive.google.com/file/d/${m[1]}/preview`,
         thumbnailUrl: `https://drive.google.com/thumbnail?id=${m[1]}&sz=w1280`,
         defaultTitle: 'Google Drive Video',
+        isOfficialIframeProvider: true,
       };
     }
   }
@@ -249,6 +346,7 @@ function detectKnownPlatform(parsedUrl: URL): {
         platform: 'Twitch',
         embedUrl: `https://player.twitch.tv/?video=${vod[1]}&autoplay=true`,
         defaultTitle: `Twitch VOD (${vod[1]})`,
+        isOfficialIframeProvider: true,
       };
     }
     return { platform: 'Twitch' };
@@ -258,6 +356,7 @@ function detectKnownPlatform(parsedUrl: URL): {
     return {
       platform: 'Rumble',
       oEmbedEndpoint: `https://rumble.com/api/Media/oembed.json?url=${encodeURIComponent(full)}`,
+      isOfficialIframeProvider: true,
     };
   }
 
@@ -267,6 +366,7 @@ function detectKnownPlatform(parsedUrl: URL): {
       platform: 'TikTok',
       embedUrl: m?.[1] ? `https://www.tiktok.com/embed/v2/${m[1]}` : undefined,
       oEmbedEndpoint: `https://www.tiktok.com/oembed?url=${encodeURIComponent(full)}`,
+      isOfficialIframeProvider: true,
     };
   }
 
@@ -341,11 +441,11 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
     }
   }
 
-  // 2. HTML / OpenGraph / JSON-LD / video stream extraction
+  // 2. HTML / OpenGraph / JSON-LD / video stream extraction from sourceUrl
   if (!DIRECT_VIDEO_EXT_RE.test(parsedUrl.pathname)) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 7500);
+      const timer = setTimeout(() => controller.abort(), 8000);
       const resp = await fetch(sourceUrl, {
         method: 'GET',
         redirect: 'follow',
@@ -363,7 +463,8 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
       if (ctype.startsWith('video/') || ctype.includes('mpegurl') || ctype.includes('mp2t')) {
         directMediaUrl = resp.url || sourceUrl;
       } else if (resp.ok && (ctype.includes('text/html') || ctype.includes('application/xhtml') || !ctype)) {
-        const html = (await resp.text()).slice(0, 500_000);
+        const html = (await resp.text()).slice(0, 750_000);
+        const finalSourceUrl = resp.url || sourceUrl;
         const jsonLd = extractJsonLdVideo(html);
 
         const metaTitle =
@@ -384,7 +485,7 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
           extractMetaTag(html, ['og:image:secure_url', 'og:image', 'twitter:image', 'twitter:image:src']) ||
           jsonLd?.thumbnailUrl ||
           /<video[^>]+poster=["']([^"']+)["']/i.exec(html)?.[1];
-        const resolvedThumb = resolveMaybeRelativeUrl(metaThumb, resp.url || sourceUrl);
+        const resolvedThumb = resolveMaybeRelativeUrl(metaThumb, finalSourceUrl);
         if (resolvedThumb && !thumbnailUrl) {
           thumbnailUrl = resolvedThumb;
         }
@@ -394,10 +495,10 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
           duration = parseIsoDurationToSeconds(metaDur) || jsonLd?.duration || 0;
         }
 
-        const ogVideo = extractMetaTag(html, ['og:video:secure_url', 'og:video', 'og:video:url']);
+        const ogVideo = extractMetaTag(html, ['og:video:secure_url', 'og:video', 'og:video:url', 'twitter:player:stream']);
         const ogVideoType = (extractMetaTag(html, ['og:video:type']) || '').toLowerCase();
         if (ogVideo) {
-          const resolvedOgVideo = resolveMaybeRelativeUrl(ogVideo, resp.url || sourceUrl);
+          const resolvedOgVideo = resolveMaybeRelativeUrl(ogVideo, finalSourceUrl);
           if (resolvedOgVideo) {
             if (
               DIRECT_VIDEO_EXT_RE.test(resolvedOgVideo) ||
@@ -412,17 +513,17 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
         }
 
         if (!directMediaUrl && jsonLd?.contentUrl) {
-          directMediaUrl = resolveMaybeRelativeUrl(jsonLd.contentUrl, resp.url || sourceUrl);
+          directMediaUrl = resolveMaybeRelativeUrl(jsonLd.contentUrl, finalSourceUrl);
         }
 
         if (!embedUrl && jsonLd?.embedUrl) {
-          embedUrl = resolveMaybeRelativeUrl(jsonLd.embedUrl, resp.url || sourceUrl);
+          embedUrl = resolveMaybeRelativeUrl(jsonLd.embedUrl, finalSourceUrl);
         }
 
         if (!embedUrl) {
           const twitterPlayer = extractMetaTag(html, ['twitter:player', 'og:video:iframe']);
           if (twitterPlayer) {
-            embedUrl = resolveMaybeRelativeUrl(twitterPlayer, resp.url || sourceUrl);
+            embedUrl = resolveMaybeRelativeUrl(twitterPlayer, finalSourceUrl);
           }
         }
 
@@ -431,28 +532,19 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
             /<(?:meta|link)[^>]+itemprop=["']embedUrl["'][^>]+(?:content|href)=["']([^"']+)["'][^>]*>/i.exec(html)?.[1] ||
             /<(?:meta|link)[^>]+(?:content|href)=["']([^"']+)["'][^>]+itemprop=["']embedUrl["'][^>]*>/i.exec(html)?.[1];
           if (itemPropEmbed) {
-            embedUrl = resolveMaybeRelativeUrl(itemPropEmbed, resp.url || sourceUrl);
+            embedUrl = resolveMaybeRelativeUrl(itemPropEmbed, finalSourceUrl);
           }
         }
 
         if (!directMediaUrl) {
-          const sourceTagMatch =
-            /<source[^>]+src=["']([^"']+)["'][^>]*type=["'](?:application\/x-mpegurl|application\/vnd\.apple\.mpegurl|video\/[^"']+)["'][^>]*>/i.exec(html) ||
-            /<source[^>]+type=["'](?:application\/x-mpegurl|application\/vnd\.apple\.mpegurl|video\/[^"']+)["'][^>]*src=["']([^"']+)["'][^>]*>/i.exec(html) ||
-            /<(?:video|source)[^>]+src=["']([^"']+(?:\.(?:mp4|webm|m3u8|mov|m4v)|\/get_file\/)[^"']*)["']/i.exec(html) ||
-            /["']((?:https?:\/\/|\/get_file\/)[^"'\s<>]+\.(?:mp4|m3u8|webm)(?:\?[^"'\s<>]*)?)["']/i.exec(html) ||
-            /(?:video_url|video_alt_url|video_url_hd|hlsUrl|hls_url|mp4Url|file)\s*[:=]\s*["']([^"']+(?:\.(?:mp4|m3u8|webm)|\/get_file\/)[^"']*)["']/i.exec(html);
-          if (sourceTagMatch?.[1]) {
-            const cleaned = sourceTagMatch[1].replace(/\\u002F/gi, '/').replace(/\\\//g, '/');
-            directMediaUrl = resolveMaybeRelativeUrl(cleaned, resp.url || sourceUrl);
-          }
+          directMediaUrl = extractDirectMediaFromHtml(html, finalSourceUrl);
         }
 
         if (!embedUrl) {
-          const iframeRegex = /<iframe[^>]+src=["']([^"']+)["'][^>]*>/gi;
+          const iframeRegex = /<iframe[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>/gi;
           let iframeMatch: RegExpExecArray | null;
           while ((iframeMatch = iframeRegex.exec(html)) !== null) {
-            const candidateIframe = resolveMaybeRelativeUrl(iframeMatch[1], resp.url || sourceUrl);
+            const candidateIframe = resolveMaybeRelativeUrl(iframeMatch[1], finalSourceUrl);
             if (
               candidateIframe &&
               !/googletagmanager|doubleclick|googlesyndication|facebook\.com\/|platform\.twitter|addthis|sharethis|disqus|recaptcha|hcaptcha|turnstile|cloudflare|adservice|popads|exoclick|juicyads|trafficjunky|chaturbate|stripchat|livejasmin|bongacams/i.test(
@@ -467,6 +559,51 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
       }
     } catch {
       // Scraping timeout / network error falls back cleanly
+    }
+  }
+
+  // 3. Second-pass: If directMediaUrl is still missing (or low-score preview) and we found a third-party embedUrl,
+  // fetch the embedUrl HTML itself to extract its underlying .mp4 / .m3u8 / flashvars stream!
+  if (
+    embedUrl &&
+    !known.isOfficialIframeProvider &&
+    (!directMediaUrl || scoreMediaCandidate(directMediaUrl) < 15)
+  ) {
+    try {
+      const eCtrl = new AbortController();
+      const eTimer = setTimeout(() => eCtrl.abort(), 6500);
+      const eResp = await fetch(embedUrl, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: eCtrl.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Referer: sourceUrl,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      });
+      clearTimeout(eTimer);
+
+      const eCtype = (eResp.headers.get('content-type') || '').toLowerCase();
+      if (eCtype.startsWith('video/') || eCtype.includes('mpegurl')) {
+        directMediaUrl = eResp.url || embedUrl;
+      } else if (eResp.ok && (eCtype.includes('text/html') || eCtype.includes('xhtml') || !eCtype)) {
+        const embedHtml = (await eResp.text()).slice(0, 600_000);
+        const extractedFromEmbed = extractDirectMediaFromHtml(embedHtml, eResp.url || embedUrl);
+        if (extractedFromEmbed) {
+          directMediaUrl = extractedFromEmbed;
+        }
+        if (!thumbnailUrl) {
+          const poster =
+            /<video[^>]+poster=["']([^"']+)["']/i.exec(embedHtml)?.[1] ||
+            extractMetaTag(embedHtml, ['og:image', 'twitter:image']);
+          thumbnailUrl = resolveMaybeRelativeUrl(poster, eResp.url || embedUrl);
+        }
+      }
+    } catch {
+      // Non-fatal; keep embedUrl intact
     }
   }
 
@@ -493,36 +630,8 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
     }
   };
 
-  // Only treat genuine player URLs as embedUrl (never mirror the raw webpage URL as an embed iframe)
-  let effectiveEmbedUrl = embedUrl && !isSamePageAsSource(embedUrl) ? embedUrl : undefined;
-  if (effectiveEmbedUrl && !known.embedUrl) {
-    try {
-      const fCtrl = new AbortController();
-      const fTimer = setTimeout(() => fCtrl.abort(), 3000);
-      const fResp = await fetch(effectiveEmbedUrl, {
-        method: 'HEAD',
-        redirect: 'follow',
-        signal: fCtrl.signal,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        },
-      });
-      clearTimeout(fTimer);
-      const xfo = (fResp.headers.get('x-frame-options') || '').toLowerCase();
-      const csp = (fResp.headers.get('content-security-policy') || '').toLowerCase();
-      const cspMatch = csp.match(/frame-ancestors\s+([^;]+)/i);
-      const blocksFrame =
-        xfo.includes('deny') ||
-        xfo.includes('sameorigin') ||
-        (cspMatch ? /'none'|'self'/i.test(cspMatch[1]) && !cspMatch[1].includes('*') : false);
-      if (blocksFrame) {
-        effectiveEmbedUrl = undefined;
-      }
-    } catch {
-      // Keep effectiveEmbedUrl if check timed out
-    }
-  }
+  // Preserve embedUrl even if host uses X-Frame-Options/CSP — the player handles safe proxy embed fallback cleanly!
+  const effectiveEmbedUrl = embedUrl && !isSamePageAsSource(embedUrl) ? embedUrl : undefined;
 
   let playbackType: ExtractedPlaybackType = 'iframe';
   if (effectiveEmbedUrl && directMediaUrl) {
