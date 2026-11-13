@@ -1,15 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import { Lock, EyeOff, KeyRound, Fingerprint, BookOpen } from 'lucide-react';
 
 export const PrivacyOverlay: React.FC = () => {
+  const pathname = usePathname();
   const {
     isPrivacyActive,
     isLocked,
     isDecoyActive,
-    unlockApp,
     setPrivacyMode,
     login,
     hasBiometricRegistered,
@@ -22,7 +23,19 @@ export const PrivacyOverlay: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isBiometricPrompting, setIsBiometricPrompting] = useState(false);
 
-  // If Decoy mode is active, completely hide privacy/lock overlay so harmless decoy is visible
+  // Ensure any active media pauses whenever lock or privacy shield becomes active (including on reload)
+  useEffect(() => {
+    if ((isPrivacyActive || isLocked) && !isDecoyActive && typeof document !== 'undefined') {
+      document.querySelectorAll('video').forEach((v) => {
+        try {
+          if (!v.paused) v.pause();
+        } catch {}
+      });
+    }
+  }, [isPrivacyActive, isLocked, isDecoyActive]);
+
+  // Never show lock/privacy overlay over /login or when Decoy mode is active
+  if (pathname === '/login') return null;
   if (isDecoyActive) return null;
   if (!isPrivacyActive && !isLocked) return null;
 
@@ -58,7 +71,7 @@ export const PrivacyOverlay: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-[#07080C]/98 text-text-primary flex flex-col items-center justify-center p-6 backdrop-blur-[64px] [-webkit-backdrop-filter:blur(64px)] select-none">
+    <div className="fixed inset-0 z-[9999] bg-[#05060A] text-text-primary flex flex-col items-center justify-center p-6 backdrop-blur-3xl [-webkit-backdrop-filter:blur(64px)] select-none">
       <div className="max-w-md w-full bg-surface border border-border p-8 rounded-2xl shadow-2xl text-center flex flex-col items-center">
         <div className="w-14 h-14 rounded-xl bg-surface-elevated border border-border flex items-center justify-center mb-5 shadow-sm text-accent">
           {isLocked ? <Lock className="w-6 h-6" /> : <EyeOff className="w-6 h-6" />}
@@ -140,6 +153,27 @@ export const PrivacyOverlay: React.FC = () => {
           </button>
         )}
       </div>
+    </div>
+  );
+};
+
+export const ProtectedContentWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const pathname = usePathname();
+  const { isLoading, isPrivacyActive, isLocked, isDecoyActive } = useAuth();
+
+  const shouldObscure =
+    pathname !== '/login' && (isLoading || isLocked || isPrivacyActive || isDecoyActive);
+
+  return (
+    <div
+      aria-hidden={shouldObscure || undefined}
+      className={
+        shouldObscure
+          ? 'blur-3xl opacity-0 pointer-events-none select-none overflow-hidden h-screen'
+          : 'flex-1 flex flex-col'
+      }
+    >
+      {children}
     </div>
   );
 };

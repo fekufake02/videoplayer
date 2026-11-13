@@ -17,6 +17,8 @@ export interface IDriveVideo extends Document {
   lastSyncedAt?: Date;
   playCount: number;
   favorite: boolean;
+  tags?: string[];
+  customTitle?: boolean;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -40,6 +42,8 @@ const driveVideoSchema = new Schema<IDriveVideo>(
     lastSyncedAt: { type: Date, default: Date.now },
     playCount: { type: Number, default: 0 },
     favorite: { type: Boolean, default: false, index: true },
+    tags: { type: [String], default: [] },
+    customTitle: { type: Boolean, default: false },
     notes: { type: String, default: '' },
   },
   {

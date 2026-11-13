@@ -100,7 +100,7 @@ export const PipProvider = ({ children }: { children: ReactNode }) => {
       {floatingVideo && (
         <div
           id="floating-pip-widget"
-          className="fixed bottom-4 right-4 z-50 w-72 sm:w-80 rounded-2xl glass-panel shadow-2xl border border-amber-400/30 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200 select-none bg-zinc-950/95 backdrop-blur-2xl"
+          className="fixed bottom-4 right-4 z-50 w-72 sm:w-80 rounded-2xl glass-panel shadow-2xl border border-indigo-500/30 overflow-hidden animate-fade-in select-none bg-[#131620]/95 backdrop-blur-2xl"
         >
           {/* Header bar */}
           <div className="px-3 py-2 bg-zinc-900/90 border-b border-white/5 flex items-center justify-between gap-2">

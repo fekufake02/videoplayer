@@ -66,7 +66,7 @@ export const UploadDock: React.FC = () => {
   return (
     <div
       id="upload-dock-container"
-      className="fixed bottom-5 right-5 z-40 animate-in fade-in slide-in-from-bottom-4 duration-200"
+      className="fixed bottom-5 right-5 z-40 animate-fade-in"
     >
       <div className="flex items-center gap-3 px-3.5 py-2.5 bg-surface-elevated/95 backdrop-blur-md border border-border rounded-xl shadow-2xl text-text-primary max-w-md">
         {/* Status Icon */}

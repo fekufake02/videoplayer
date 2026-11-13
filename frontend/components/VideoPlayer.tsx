@@ -114,25 +114,124 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return reliableSample;
   };
 
-  const [activeSrc, setActiveSrc] = useState<string>(() => getReliableSource(streamUrl));
+  const toProxyIfExternal = useCallback((url: string) => {
+    if (!url) return url;
+    if (url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:')) {
+      return url;
+    }
+    if (
+      url.includes('zencdn.net') ||
+      url.includes('interactive-examples.mdn.mozilla.net') ||
+      url.includes('githubusercontent.com')
+    ) {
+      return url;
+    }
+    return `/api/stream-proxy?url=${encodeURIComponent(url)}`;
+  }, []);
+
+  const detectPreferredEngine = useCallback(
+    (url: string): 'native' | 'hls' | 'mpegts' => {
+      const lowerUrl = (url || '').toLowerCase();
+      const lowerName = (video.originalFilename || '').toLowerCase();
+      const lowerMime = (video.mimeType || '').toLowerCase();
+
+      if (
+        (/\.(m3u8)(\?|$)/.test(lowerUrl) ||
+          lowerName.endsWith('.m3u8') ||
+          lowerMime.includes('mpegurl')) &&
+        Hls &&
+        Hls.isSupported()
+      ) {
+        return 'hls';
+      }
+
+      if (
+        (/\.(m2?ts|mts|flv)(\?|$)/.test(lowerUrl) ||
+          /\.(m2?ts|mts|flv)$/.test(lowerName) ||
+          lowerMime.includes('mp2t') ||
+          lowerMime.includes('x-flv')) &&
+        mpegts &&
+        mpegts.isSupported()
+      ) {
+        return 'mpegts';
+      }
+
+      return 'native';
+    },
+    [video.originalFilename, video.mimeType]
+  );
+
+  const initialResolvedSrc = getReliableSource(streamUrl);
+  const [activeSrc, setActiveSrc] = useState<string>(initialResolvedSrc);
+  const [engineMode, setEngineMode] = useState<'native' | 'hls' | 'mpegts'>(() =>
+    detectPreferredEngine(initialResolvedSrc)
+  );
+  const [playbackNonce, setPlaybackNonce] = useState<number>(0);
+  const [hasPlaybackError, setHasPlaybackError] = useState(false);
+  const [playbackErrorKind, setPlaybackErrorKind] = useState<'codec' | 'network'>('codec');
+
+  const rawStreamUrlRef = useRef<string>(initialResolvedSrc);
   const mpegtsPlayerRef = useRef<any>(null);
   const hlsPlayerRef = useRef<any>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+  const pendingPlayRef = useRef<boolean>(false);
+  const recoveryStageRef = useRef<'none' | 'refreshed' | 'proxy' | 'reloaded' | 'mpegts' | 'exhausted'>('none');
+  const proxyRetryCountRef = useRef<number>(0);
+  const mpegtsRetryCountRef = useRef<number>(0);
+  const healthyPlayStartRef = useRef<number | null>(null);
+  const currentTimeRef = useRef<number>(0);
+  const durationRef = useRef<number>(video.duration || 0);
+
+  const destroyStreamEngines = useCallback(() => {
+    if (mpegtsPlayerRef.current) {
+      try {
+        mpegtsPlayerRef.current.pause?.();
+        mpegtsPlayerRef.current.unload?.();
+        mpegtsPlayerRef.current.detachMediaElement?.();
+        mpegtsPlayerRef.current.destroy?.();
+      } catch {}
+      mpegtsPlayerRef.current = null;
+    }
+    if (hlsPlayerRef.current) {
+      try {
+        hlsPlayerRef.current.destroy?.();
+      } catch {}
+      hlsPlayerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
-    if (streamUrl && streamUrl.trim().length > 0 && !streamUrl.includes('commondatastorage.googleapis.com')) {
-      setActiveSrc(streamUrl);
-    } else if (video.streamUrl && !video.streamUrl.includes('commondatastorage.googleapis.com')) {
-      setActiveSrc(video.streamUrl);
-    } else {
-      setActiveSrc(reliableSample);
-    }
-  }, [streamUrl, video.streamUrl, reliableSample]);
+    destroyStreamEngines();
+    recoveryStageRef.current = 'none';
+    proxyRetryCountRef.current = 0;
+    mpegtsRetryCountRef.current = 0;
+    healthyPlayStartRef.current = null;
+    pendingSeekRef.current = null;
+    pendingPlayRef.current = false;
+    setPlaybackNonce(0);
+    setHasPlaybackError(false);
+    setPlaybackErrorKind('codec');
+
+    const nextSrc = getReliableSource(streamUrl);
+    rawStreamUrlRef.current = nextSrc;
+    setActiveSrc(nextSrc);
+    setEngineMode(detectPreferredEngine(nextSrc));
+  }, [video._id, streamUrl, detectPreferredEngine, destroyStreamEngines]);
+
+  useEffect(() => {
+    return () => {
+      destroyStreamEngines();
+    };
+  }, [destroyStreamEngines]);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMediaReady, setIsMediaReady] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(video.duration || 0);
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
   const [volume, setVolume] = useState(settings?.defaultVolume ?? 1);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(settings?.defaultPlaybackSpeed ?? 1);
@@ -236,22 +335,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }));
   };
 
-  // Web Audio API DSP Equalizer Hardware Graph (Only active on non-default presets)
+  // Web Audio API DSP Equalizer Hardware Graph (Only active on non-default presets + CORS-safe sources)
   const audioGraphRef = useRef<PlayerAudioGraph | null>(null);
 
-  const initAudioGraph = useCallback(() => {
-    if (audioPreset === 'normal') return;
-    if (!videoRef.current || audioGraphRef.current) return;
-    try {
-      const graph = createAudioGraph(videoRef.current);
-      if (graph) {
-        audioGraphRef.current = graph;
-        applyDspPreset(graph, audioPreset);
-      }
-    } catch (e) {
-      console.warn('Audio DSP initialization notice:', e);
-    }
-  }, [audioPreset]);
+  const hasCorsSafeSource = useCallback((url: string) => {
+    return (
+      !url ||
+      url.startsWith('/') ||
+      url.startsWith('blob:') ||
+      url.startsWith('data:') ||
+      url.includes('zencdn.net') ||
+      url.includes('interactive-examples.mdn.mozilla.net') ||
+      url.includes('githubusercontent.com')
+    );
+  }, []);
 
   useEffect(() => {
     if (audioPreset === 'normal') {
@@ -260,6 +357,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
       return;
     }
+
+    // Never attach createMediaElementSource to a non-CORS external URL or Chrome will mute audio
+    if (!hasCorsSafeSource(activeSrc)) {
+      const proxied = toProxyIfExternal(rawStreamUrlRef.current || activeSrc);
+      if (proxied && proxied !== activeSrc) {
+        if (currentTimeRef.current > 0.5) {
+          pendingSeekRef.current = currentTimeRef.current;
+        }
+        pendingPlayRef.current = isPlayingRef.current;
+        setActiveSrc(proxied);
+      }
+      return;
+    }
+
     if (!audioGraphRef.current && videoRef.current) {
       try {
         const graph = createAudioGraph(videoRef.current);
@@ -276,7 +387,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
       applyDspPreset(audioGraphRef.current, audioPreset);
     }
-  }, [audioPreset]);
+  }, [audioPreset, activeSrc, hasCorsSafeSource, toProxyIfExternal]);
 
   // Generate WebVTT synchronized demo subtitles track
   useEffect(() => {
@@ -343,13 +454,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   useEffect(() => {
     if (video._id && !contactSheetUrl && duration > 0 && activeSrc) {
-      generateContactSheet(activeSrc, duration, video._id)
+      const lowerRaw = (rawStreamUrlRef.current || activeSrc).toLowerCase();
+      const lowerName = (video.originalFilename || '').toLowerCase();
+      if (/\.(m3u8|m2?ts|mts|flv)(\?|$)/.test(lowerRaw) || /\.(m3u8|m2?ts|mts|flv)$/.test(lowerName)) {
+        return;
+      }
+      generateContactSheet(toProxyIfExternal(activeSrc), duration, video._id)
         .then((url) => {
           if (url) setContactSheetUrl(url);
         })
         .catch(() => {});
     }
-  }, [video._id, duration, activeSrc, contactSheetUrl]);
+  }, [video._id, duration, activeSrc, contactSheetUrl, video.originalFilename, toProxyIfExternal]);
 
   // Zoom & Pan State (1.0x to 4.0x / 100% to 400%)
   const [zoomScale, setZoomScale] = useState(1.0);
@@ -455,8 +571,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoRef.current.volume = isMuted ? 0 : (volume > 0 ? volume : 1);
       videoRef.current.playbackRate = playbackSpeed;
 
-      if (settings?.autoResume && video.lastPosition && !showResumePrompt) {
-        videoRef.current.currentTime = video.lastPosition;
+      if (pendingSeekRef.current !== null && isFinite(pendingSeekRef.current)) {
+        const target = Math.max(0, pendingSeekRef.current);
+        pendingSeekRef.current = null;
+        try {
+          videoRef.current.currentTime = target;
+          setCurrentTime(target);
+          currentTimeRef.current = target;
+        } catch {}
+      } else if (settings?.autoResume && video.lastPosition && !showResumePrompt && currentTimeRef.current < 1) {
+        try {
+          videoRef.current.currentTime = video.lastPosition;
+        } catch {}
       }
       setIsMediaReady(true);
       setIsWaiting(false);
@@ -474,6 +600,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsMediaReady(true);
     setIsWaiting(false);
     setHasPlaybackError(false);
+
+    if (videoRef.current && pendingSeekRef.current !== null && isFinite(pendingSeekRef.current) && videoRef.current.readyState >= 1) {
+      const target = Math.max(0, pendingSeekRef.current);
+      pendingSeekRef.current = null;
+      try {
+        videoRef.current.currentTime = target;
+      } catch {}
+    }
+
+    if (videoRef.current && pendingPlayRef.current) {
+      pendingPlayRef.current = false;
+      videoRef.current.play().catch((err) => {
+        if (err?.name === 'NotAllowedError' && videoRef.current) {
+          videoRef.current.muted = true;
+          setIsMuted(true);
+          videoRef.current.play().catch(() => {});
+        }
+      });
+    }
   };
 
   // Always pause playback immediately on tab switch or window minimize
@@ -516,58 +661,401 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, []);
 
-  const [hasPlaybackError, setHasPlaybackError] = useState(false);
+  const attemptStreamRecovery = useCallback(async () => {
+    const vidEl = videoRef.current;
+    const errCode = vidEl?.error?.code;
 
-  const handleVideoError = useCallback((e?: any) => {
-    setIsWaiting(false);
+    // MEDIA_ERR_ABORTED (1) occurs legitimately when user skips/seeks rapidly — never treat as an error
+    if (errCode === 1) {
+      setIsWaiting(false);
+      return;
+    }
 
-    // Attempt mpegts.js demuxing fallback for MPEG-TS streams (.ts container disguised as mp4)
-    if (activeSrc && mpegts && mpegts.isSupported() && !mpegtsPlayerRef.current && videoRef.current) {
+    const resumeAt = Math.max(
+      pendingSeekRef.current ?? 0,
+      currentTimeRef.current || 0,
+      vidEl?.currentTime || 0
+    );
+    const shouldResume = isPlayingRef.current || pendingPlayRef.current;
+    const wasUsingProxy = activeSrc.startsWith('/api/stream-proxy');
+
+    // Tier 1: Refresh B2 presigned stream URL (handles expired signatures or stale URL on long pause/seek)
+    if (recoveryStageRef.current === 'none') {
+      recoveryStageRef.current = 'refreshed';
       try {
-        console.log('Attempting mpegts.js demuxer fallback for MPEG-TS stream:', activeSrc);
+        const refreshed = await api.refreshStreamUrl(video._id);
+        if (refreshed?.success && refreshed.streamUrl) {
+          rawStreamUrlRef.current = refreshed.streamUrl;
+          pendingSeekRef.current = resumeAt > 0.5 ? resumeAt : null;
+          pendingPlayRef.current = shouldResume;
+          setIsWaiting(true);
+          setHasPlaybackError(false);
+
+          const candidateSrc =
+            wasUsingProxy || audioPreset !== 'normal'
+              ? toProxyIfExternal(refreshed.streamUrl)
+              : refreshed.streamUrl;
+
+          if (candidateSrc && candidateSrc !== activeSrc) {
+            setActiveSrc(candidateSrc);
+            return;
+          }
+        }
+      } catch {
+        // Proceed to next recovery tier
+      }
+    }
+
+    // Tier 2: Route external B2 / CDN URL through same-origin HTTP Range proxy
+    if (
+      recoveryStageRef.current === 'refreshed' &&
+      rawStreamUrlRef.current &&
+      !rawStreamUrlRef.current.startsWith('/') &&
+      !rawStreamUrlRef.current.startsWith('blob:')
+    ) {
+      const proxied = toProxyIfExternal(rawStreamUrlRef.current);
+      if (proxied && proxied !== activeSrc) {
+        recoveryStageRef.current = 'proxy';
+        pendingSeekRef.current = resumeAt > 0.5 ? resumeAt : null;
+        pendingPlayRef.current = shouldResume;
+        setIsWaiting(true);
+        setHasPlaybackError(false);
+        setActiveSrc(proxied);
+        return;
+      }
+    }
+
+    // Tier 2.2: Retry active Range proxy connection up to 2 times for transient network/seek decode interruptions
+    if (
+      (wasUsingProxy || activeSrc.startsWith('/api/')) &&
+      (errCode === 2 || errCode === 3) &&
+      proxyRetryCountRef.current < 2 &&
+      engineMode === 'native'
+    ) {
+      proxyRetryCountRef.current += 1;
+      pendingSeekRef.current = resumeAt > 0.5 ? resumeAt : null;
+      pendingPlayRef.current = shouldResume;
+      setIsWaiting(true);
+      setHasPlaybackError(false);
+      setTimeout(() => {
+        setPlaybackNonce((n) => n + 1);
+      }, 250);
+      return;
+    }
+
+    // Tier 2.5: Cleanly reload native video element once to recover from interrupted Range read / seek stall
+    if (
+      (recoveryStageRef.current === 'refreshed' || recoveryStageRef.current === 'proxy') &&
+      vidEl &&
+      engineMode === 'native'
+    ) {
+      recoveryStageRef.current = 'reloaded';
+      pendingSeekRef.current = resumeAt > 0.5 ? resumeAt : null;
+      pendingPlayRef.current = shouldResume;
+      setIsWaiting(true);
+      setHasPlaybackError(false);
+      setTimeout(() => {
+        setPlaybackNonce((n) => n + 1);
+        if (videoRef.current) {
+          videoRef.current.load();
+        }
+      }, 200);
+      return;
+    }
+
+    // Tier 3: Escalate to mpegts.js ONLY for MPEG-TS / FLV / binary dynamic containers
+    const lowerRaw = (rawStreamUrlRef.current || activeSrc || '').toLowerCase();
+    const lowerName = (video.originalFilename || '').toLowerCase();
+    const lowerMime = (video.mimeType || '').toLowerCase();
+    const isTsOrDynamicContainer =
+      /\.(m2?ts|mts|flv|bin)(\?|$)/.test(lowerRaw) ||
+      /\.(m2?ts|mts|flv|bin)$/.test(lowerName) ||
+      lowerMime.includes('mp2t') ||
+      lowerMime.includes('flv') ||
+      lowerMime.includes('octet-stream');
+
+    if (
+      isTsOrDynamicContainer &&
+      recoveryStageRef.current !== 'mpegts' &&
+      recoveryStageRef.current !== 'exhausted' &&
+      mpegts &&
+      mpegts.isSupported() &&
+      rawStreamUrlRef.current &&
+      engineMode !== 'mpegts'
+    ) {
+      recoveryStageRef.current = 'mpegts';
+      pendingSeekRef.current = resumeAt > 0.5 ? resumeAt : null;
+      pendingPlayRef.current = shouldResume;
+      setIsWaiting(true);
+      setHasPlaybackError(false);
+      setEngineMode('mpegts');
+      return;
+    }
+
+    // Exhausted all automatic recovery tiers
+    recoveryStageRef.current = 'exhausted';
+    setIsWaiting(false);
+    setIsMediaReady(true);
+    setPlaybackErrorKind(errCode === 2 || (typeof navigator !== 'undefined' && !navigator.onLine) ? 'network' : 'codec');
+    setHasPlaybackError(true);
+  }, [activeSrc, audioPreset, engineMode, toProxyIfExternal, video._id, video.originalFilename, video.mimeType]);
+
+  const handleManualRetry = useCallback(async () => {
+    destroyStreamEngines();
+    recoveryStageRef.current = 'none';
+    proxyRetryCountRef.current = 0;
+    mpegtsRetryCountRef.current = 0;
+    healthyPlayStartRef.current = null;
+    const resumeAt = Math.max(pendingSeekRef.current ?? 0, currentTimeRef.current || 0);
+    pendingSeekRef.current = resumeAt > 0.5 ? resumeAt : null;
+    pendingPlayRef.current = true;
+    setHasPlaybackError(false);
+    setIsWaiting(true);
+
+    let freshBase = getReliableSource(streamUrl);
+    try {
+      const refreshed = await api.refreshStreamUrl(video._id);
+      if (refreshed?.success && refreshed.streamUrl) {
+        freshBase = refreshed.streamUrl;
+      }
+    } catch {}
+
+    rawStreamUrlRef.current = freshBase;
+    const nextEngine = detectPreferredEngine(freshBase);
+    setEngineMode(nextEngine);
+    setActiveSrc(freshBase);
+    setPlaybackNonce((n) => n + 1);
+
+    if (nextEngine === 'native' && videoRef.current) {
+      try {
+        videoRef.current.src = freshBase;
+        videoRef.current.load();
+      } catch {}
+    }
+  }, [destroyStreamEngines, detectPreferredEngine, streamUrl, video._id]);
+
+  // Proactive & fallback MSE engine mounting for HLS (.m3u8) and MPEG-TS / FLV dynamic streams
+  useEffect(() => {
+    const vidEl = videoRef.current;
+    if (!vidEl || !activeSrc) return;
+
+    if (engineMode === 'native') {
+      destroyStreamEngines();
+      return;
+    }
+
+    destroyStreamEngines();
+    let cancelled = false;
+    const baseStreamSource = toProxyIfExternal(rawStreamUrlRef.current || activeSrc);
+    const streamSource =
+      playbackNonce > 0 && baseStreamSource.startsWith('/api/stream-proxy')
+        ? `${baseStreamSource.replace(/&_r=\d+/, '')}&_r=${playbackNonce}`
+        : baseStreamSource;
+
+    const tryResumeMsePlay = (playerInstance?: any) => {
+      if (!pendingPlayRef.current || cancelled) return;
+      const playTarget = playerInstance || vidEl;
+      const playPromise = playTarget.play?.();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            if (!cancelled) {
+              pendingPlayRef.current = false;
+              setIsPlaying(true);
+              setIsWaiting(false);
+              setShowControls(true);
+            }
+          })
+          .catch((err: any) => {
+            if (err?.name === 'AbortError') return;
+            if (err?.name === 'NotAllowedError' && vidEl) {
+              vidEl.muted = true;
+              setIsMuted(true);
+              vidEl
+                .play()
+                .then(() => {
+                  if (!cancelled) {
+                    pendingPlayRef.current = false;
+                    setIsPlaying(true);
+                    setIsWaiting(false);
+                  }
+                })
+                .catch(() => {});
+            }
+          });
+      }
+    };
+
+    if (engineMode === 'hls' && Hls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        maxBufferLength: 30,
+      });
+      hls.loadSource(streamSource);
+      hls.attachMedia(vidEl);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (cancelled) return;
+        setHasPlaybackError(false);
+        setIsMediaReady(true);
+        setIsWaiting(false);
+        if (pendingSeekRef.current !== null && isFinite(pendingSeekRef.current)) {
+          try {
+            vidEl.currentTime = pendingSeekRef.current;
+          } catch {}
+          pendingSeekRef.current = null;
+        }
+        tryResumeMsePlay(vidEl);
+      });
+      hls.on(Hls.Events.ERROR, (_evt: any, data: any) => {
+        if (cancelled || !data?.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+        } else if (mpegtsRetryCountRef.current < 2) {
+          mpegtsRetryCountRef.current += 1;
+          pendingSeekRef.current = currentTimeRef.current > 0.5 ? currentTimeRef.current : pendingSeekRef.current;
+          pendingPlayRef.current = isPlayingRef.current || pendingPlayRef.current;
+          setTimeout(() => {
+            if (!cancelled) setPlaybackNonce((n) => n + 1);
+          }, 400);
+        } else {
+          destroyStreamEngines();
+          setIsWaiting(false);
+          setIsMediaReady(true);
+          setPlaybackErrorKind(data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network' : 'codec');
+          setHasPlaybackError(true);
+        }
+      });
+      hlsPlayerRef.current = hls;
+      return () => {
+        cancelled = true;
+        destroyStreamEngines();
+      };
+    }
+
+    if (engineMode === 'mpegts' && mpegts && mpegts.isSupported()) {
+      try {
+        const lower = (rawStreamUrlRef.current || activeSrc).toLowerCase();
+        const lowerName = (video.originalFilename || '').toLowerCase();
+        const lowerMime = (video.mimeType || '').toLowerCase();
+        const isFlv = lower.includes('.flv') || lowerName.endsWith('.flv') || lowerMime.includes('flv');
+        const isM2ts = /\.(m2ts|mts)(\?|$)/.test(lower) || /\.(m2ts|mts)$/.test(lowerName);
+        const knownDur = durationRef.current > 0 ? durationRef.current : (video.duration || 0);
+
         const player = mpegts.createPlayer(
           {
-            type: 'mse',
+            type: isFlv ? 'flv' : (isM2ts ? 'm2ts' : 'mpegts'),
             isLive: false,
-            url: activeSrc,
+            cors: true,
+            url: streamSource,
+            duration: knownDur > 0 ? Math.floor(knownDur * 1000) : undefined,
+            filesize: video.size && video.size > 0 ? video.size : undefined,
           },
           {
-            enableStashBuffer: false,
-            stashInitialSize: 128,
+            enableStashBuffer: true,
+            stashInitialSize: 512,
+            lazyLoad: true,
             lazyLoadMaxDuration: 3 * 60,
+            autoCleanupSourceBuffer: true,
+            accurateSeek: true,
+            seekType: 'range',
+            rangeLoadZeroStart: true,
+            reuseRedirectedURL: true,
           }
         );
-        player.attachMediaElement(videoRef.current);
-        player.load();
-        const res = player.play();
-        if (res && typeof (res as any).then === 'function') {
-          (res as Promise<void>).then(() => {
-            setIsPlaying(true);
-            setShowControls(true);
-          }).catch(() => {});
-        } else {
-          setIsPlaying(true);
-          setShowControls(true);
-        }
 
-        player.on(mpegts.Events.ERROR, (errType: string, errDetail: string) => {
+        player.attachMediaElement(vidEl);
+        player.load();
+
+        player.on(mpegts.Events.MEDIA_INFO, (info: any) => {
+          if (cancelled) return;
+          setHasPlaybackError(false);
+          setIsMediaReady(true);
+          setIsWaiting(false);
+          if (info?.duration && isFinite(info.duration) && info.duration > 0) {
+            setDuration(info.duration / 1000);
+          }
+          if (pendingSeekRef.current !== null && isFinite(pendingSeekRef.current)) {
+            const target = pendingSeekRef.current;
+            pendingSeekRef.current = null;
+            try {
+              player.currentTime = target;
+            } catch {
+              try {
+                vidEl.currentTime = target;
+              } catch {}
+            }
+          }
+          tryResumeMsePlay(player);
+        });
+
+        player.on(mpegts.Events.ERROR, async (errType: string, errDetail: string) => {
+          if (cancelled) return;
           console.warn('mpegts.js player error:', errType, errDetail);
+          if (mpegtsRetryCountRef.current < 2) {
+            mpegtsRetryCountRef.current += 1;
+            const resumeAt = Math.max(
+              pendingSeekRef.current ?? 0,
+              currentTimeRef.current || 0,
+              vidEl?.currentTime || 0
+            );
+            pendingSeekRef.current = resumeAt > 0.5 ? resumeAt : null;
+            pendingPlayRef.current = isPlayingRef.current || pendingPlayRef.current;
+            setIsWaiting(true);
+            try {
+              const refreshed = await api.refreshStreamUrl(video._id);
+              if (!cancelled && refreshed?.success && refreshed.streamUrl) {
+                rawStreamUrlRef.current = refreshed.streamUrl;
+              }
+            } catch {}
+            if (!cancelled) {
+              setTimeout(() => {
+                if (!cancelled) setPlaybackNonce((n) => n + 1);
+              }, 400);
+            }
+            return;
+          }
+          setIsWaiting(false);
+          setIsMediaReady(true);
+          setPlaybackErrorKind(errType === mpegts.ErrorTypes.NETWORK_ERROR ? 'network' : 'codec');
           setHasPlaybackError(true);
         });
 
         mpegtsPlayerRef.current = player;
         setHasPlaybackError(false);
         setIsMediaReady(true);
-        return;
+
+        if (pendingPlayRef.current) {
+          tryResumeMsePlay(player);
+        }
       } catch (err) {
         console.warn('mpegts.js initialization failed:', err);
+        setIsWaiting(false);
+        setIsMediaReady(true);
+        setPlaybackErrorKind('codec');
+        setHasPlaybackError(true);
       }
-    }
 
-    setIsMediaReady(true);
-    setHasPlaybackError(true);
-    console.warn('HTML5 Video decoding error on source:', activeSrc, e);
-  }, [activeSrc]);
+      return () => {
+        cancelled = true;
+        destroyStreamEngines();
+      };
+    }
+  }, [activeSrc, engineMode, playbackNonce, video._id, video.mimeType, video.size, video.originalFilename, destroyStreamEngines, toProxyIfExternal]);
+
+  const handleVideoError = useCallback(
+    (e?: any) => {
+      if (engineMode !== 'native') {
+        // Error events from <video> while MSE engine is tearing down or seeking shouldn't double-trigger
+        return;
+      }
+      console.warn('Native HTML5 Video event notice on source:', activeSrc, videoRef.current?.error?.code, e);
+      attemptStreamRecovery();
+    },
+    [activeSrc, engineMode, attemptStreamRecovery]
+  );
 
   // Play / Pause Toggle
   const togglePlay = useCallback(() => {
@@ -575,15 +1063,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (audioGraphRef.current && audioGraphRef.current.ctx.state === 'suspended') {
       audioGraphRef.current.ctx.resume().catch(() => {});
     }
+
+    // If element is in an errored state and user presses Play, trigger recovery retry cleanly
+    if (videoRef.current.error || hasPlaybackError) {
+      handleManualRetry();
+      return;
+    }
+
     if (videoRef.current.paused) {
       if (!isMuted) {
         videoRef.current.muted = false;
         videoRef.current.volume = volume > 0 ? volume : 1;
       }
+      pendingPlayRef.current = true;
       const playPromise = videoRef.current.play();
       if (playPromise !== undefined) {
         playPromise
           .then(() => {
+            pendingPlayRef.current = false;
             setIsPlaying(true);
             setIsWaiting(false);
             setIsMediaReady(true);
@@ -591,74 +1088,122 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             setHasPlaybackError(false);
           })
           .catch((err) => {
-            console.warn('Playback error:', err);
-            if (err.name === 'NotAllowedError' && videoRef.current) {
+            // AbortError is normal when seeking/skipping/pausing interrupts play() — never show codec error
+            if (err?.name === 'AbortError') {
+              return;
+            }
+            if (err?.name === 'NotAllowedError' && videoRef.current) {
               videoRef.current.muted = true;
               setIsMuted(true);
-              videoRef.current.play().then(() => {
-                setIsPlaying(true);
-                setIsWaiting(false);
-                setIsMediaReady(true);
-              }).catch(() => {
-                setHasPlaybackError(true);
-              });
+              videoRef.current
+                .play()
+                .then(() => {
+                  pendingPlayRef.current = false;
+                  setIsPlaying(true);
+                  setIsWaiting(false);
+                  setIsMediaReady(true);
+                  setHasPlaybackError(false);
+                })
+                .catch((err2) => {
+                  if (err2?.name !== 'AbortError') {
+                    attemptStreamRecovery();
+                  }
+                });
+            } else if (videoRef.current?.error) {
+              attemptStreamRecovery();
             } else {
-              setHasPlaybackError(true);
+              console.warn('Non-fatal play() interruption:', err);
             }
           });
       }
     } else {
+      pendingPlayRef.current = false;
       videoRef.current.pause();
       setIsPlaying(false);
       setIsWaiting(false);
       setShowControls(true);
     }
-  }, [isMuted, volume]);
+  }, [isMuted, volume, hasPlaybackError, handleManualRetry, attemptStreamRecovery]);
 
-  const handleDirectSeek = (newTime: number) => {
-    const safeDuration = (duration && isFinite(duration) && duration > 0) ? duration : (video.duration || 0);
-    const safeTime = safeDuration > 0
-      ? Math.max(0, Math.min(safeDuration, newTime))
-      : Math.max(0, newTime);
-    setCurrentTime(safeTime);
-
-    if (mpegtsPlayerRef.current) {
-      try {
-        mpegtsPlayerRef.current.currentTime = safeTime;
-      } catch (e) {
-        if (videoRef.current) videoRef.current.currentTime = safeTime;
-      }
-    } else if (videoRef.current) {
-      videoRef.current.currentTime = safeTime;
-    }
-    resetControlsTimeout();
-  };
-
-  // Skip Control (-10, +10)
-  const skip = useCallback(
-    (seconds: number) => {
-      const current = (mpegtsPlayerRef.current?.currentTime && isFinite(mpegtsPlayerRef.current.currentTime))
-        ? mpegtsPlayerRef.current.currentTime
-        : (videoRef.current?.currentTime || currentTime || 0);
-
+  const seekToTime = useCallback(
+    (newTime: number) => {
       const safeDuration = (duration && isFinite(duration) && duration > 0) ? duration : (video.duration || 0);
-      const target = safeDuration > 0
-        ? Math.max(0, Math.min(safeDuration, current + seconds))
-        : Math.max(0, current + seconds);
+      const safeTime = safeDuration > 0
+        ? Math.max(0, Math.min(safeDuration, newTime))
+        : Math.max(0, newTime);
 
-      setCurrentTime(target);
-      if (mpegtsPlayerRef.current) {
-        try {
-          mpegtsPlayerRef.current.currentTime = target;
-        } catch (e) {
-          if (videoRef.current) videoRef.current.currentTime = target;
-        }
-      } else if (videoRef.current) {
-        videoRef.current.currentTime = target;
+      setCurrentTime(safeTime);
+      currentTimeRef.current = safeTime;
+      setHasPlaybackError(false);
+
+      const vidEl = videoRef.current;
+      if (!vidEl) {
+        pendingSeekRef.current = safeTime;
+        resetControlsTimeout();
+        return;
       }
+
+      if (vidEl.error) {
+        pendingSeekRef.current = safeTime;
+        pendingPlayRef.current = isPlayingRef.current || pendingPlayRef.current;
+        handleManualRetry();
+        resetControlsTimeout();
+        return;
+      }
+
+      if (vidEl.readyState < 1) {
+        pendingSeekRef.current = safeTime;
+        resetControlsTimeout();
+        return;
+      }
+
+      const wasPlaying = isPlayingRef.current || !vidEl.paused;
+      if (wasPlaying) {
+        pendingPlayRef.current = true;
+      }
+
+      if (mpegtsPlayerRef.current) {
+        pendingSeekRef.current = null;
+        setIsWaiting(true);
+        try {
+          mpegtsPlayerRef.current.currentTime = safeTime;
+        } catch {
+          try {
+            vidEl.currentTime = safeTime;
+          } catch {}
+        }
+      } else {
+        try {
+          vidEl.currentTime = safeTime;
+        } catch {
+          pendingSeekRef.current = safeTime;
+        }
+      }
+
       resetControlsTimeout();
     },
-    [duration, video.duration, currentTime, resetControlsTimeout]
+    [duration, video.duration, resetControlsTimeout, handleManualRetry]
+  );
+
+  const handleDirectSeek = (newTime: number) => {
+    seekToTime(newTime);
+  };
+
+  // Skip Control (-10, +10) — accumulate consecutively if user clicks while already seeking
+  const skip = useCallback(
+    (seconds: number) => {
+      const isActivelySeeking = !!videoRef.current?.seeking;
+      const current = isActivelySeeking
+        ? currentTimeRef.current
+        : (mpegtsPlayerRef.current?.currentTime && isFinite(mpegtsPlayerRef.current.currentTime))
+        ? mpegtsPlayerRef.current.currentTime
+        : (videoRef.current?.currentTime && isFinite(videoRef.current.currentTime)
+            ? videoRef.current.currentTime
+            : currentTimeRef.current || 0);
+
+      seekToTime(current + seconds);
+    },
+    [seekToTime]
   );
 
   // Volume Adjustment
@@ -956,9 +1501,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!videoRef.current) return;
     const cur = videoRef.current.currentTime;
     setCurrentTime(cur);
+    currentTimeRef.current = cur;
 
     if (isWaiting) setIsWaiting(false);
     if (!isMediaReady) setIsMediaReady(true);
+    if (hasPlaybackError) setHasPlaybackError(false);
+
+    // Reset recovery tiers once playback runs cleanly for >1.5s without error
+    if (!videoRef.current.error && !videoRef.current.seeking && videoRef.current.readyState >= 3) {
+      if (healthyPlayStartRef.current === null) {
+        healthyPlayStartRef.current = Date.now();
+      } else if (Date.now() - healthyPlayStartRef.current > 1500) {
+        recoveryStageRef.current = 'none';
+        proxyRetryCountRef.current = 0;
+        mpegtsRetryCountRef.current = 0;
+      }
+    } else {
+      healthyPlayStartRef.current = null;
+    }
 
     // A-B Repeat Loop Check
     if (abRepeat.active && abRepeat.pointB !== null && abRepeat.pointA !== null && cur >= abRepeat.pointB) {
@@ -1202,35 +1762,52 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           cursor: zoomScale > 1.05 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default',
         }}
       >
-        <video
-          ref={videoRef}
-          src={activeSrc}
-          poster={resolvedThumbnail}
-          preload="metadata"
-          muted={isMuted}
-          crossOrigin={activeSrc.startsWith('/') || activeSrc.startsWith('blob:') || activeSrc.includes('zencdn.net') || activeSrc.includes('interactive-examples') || activeSrc.includes('githubusercontent') ? 'anonymous' : undefined}
-          onLoadedMetadata={handleLoadedMetadata}
-          onDurationChange={() => {
-            if (videoRef.current && videoRef.current.duration && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
-              setDuration(videoRef.current.duration);
-            }
-          }}
-          onTimeUpdate={handleTimeUpdate}
-          onWaiting={() => setIsWaiting(true)}
-          onSeeking={() => setIsWaiting(true)}
-          onLoadStart={() => {
-            if (isPlaying) setIsWaiting(true);
-          }}
-          onLoadedData={handleMediaReady}
-          onCanPlay={handleMediaReady}
-          onCanPlayThrough={handleMediaReady}
-          onPlaying={() => {
-            handleMediaReady();
-            setIsWaiting(false);
-            setIsPlaying(true);
-            resetControlsTimeout();
-          }}
-          onSeeked={() => setIsWaiting(false)}
+      {(() => {
+        const effectiveNativeSrc =
+          playbackNonce > 0 && engineMode === 'native' && activeSrc.startsWith('/api/stream-proxy')
+            ? `${activeSrc.replace(/&_r=\d+/, '')}&_r=${playbackNonce}`
+            : activeSrc;
+        return (
+          <video
+            ref={videoRef}
+            src={engineMode === 'native' ? effectiveNativeSrc : undefined}
+            poster={resolvedThumbnail}
+            preload="auto"
+            muted={isMuted}
+            crossOrigin={hasCorsSafeSource(effectiveNativeSrc) ? 'anonymous' : undefined}
+            onLoadedMetadata={handleLoadedMetadata}
+            onDurationChange={() => {
+              if (videoRef.current && videoRef.current.duration && isFinite(videoRef.current.duration) && !isNaN(videoRef.current.duration) && videoRef.current.duration > 0) {
+                setDuration(videoRef.current.duration);
+              }
+            }}
+            onTimeUpdate={handleTimeUpdate}
+            onWaiting={() => setIsWaiting(true)}
+            onSeeking={() => setIsWaiting(true)}
+            onLoadStart={() => {
+              if (isPlaying) setIsWaiting(true);
+            }}
+            onLoadedData={handleMediaReady}
+            onCanPlay={handleMediaReady}
+            onCanPlayThrough={handleMediaReady}
+            onPlaying={() => {
+              pendingPlayRef.current = false;
+              recoveryStageRef.current = 'none';
+              proxyRetryCountRef.current = 0;
+              mpegtsRetryCountRef.current = 0;
+              handleMediaReady();
+              setIsWaiting(false);
+              setIsPlaying(true);
+              setHasPlaybackError(false);
+              resetControlsTimeout();
+            }}
+            onSeeked={() => {
+              setIsWaiting(false);
+              if (pendingPlayRef.current && videoRef.current && videoRef.current.paused) {
+                pendingPlayRef.current = false;
+                videoRef.current.play().catch(() => {});
+              }
+            }}
           onPause={() => {
             setIsPlaying(false);
             setIsWaiting(false);
@@ -1252,7 +1829,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             }
           }}
           onError={handleVideoError}
-          className={`relative z-1 w-full h-full pointer-events-none transition-all ${
+          className={`relative z-[1] w-full h-full pointer-events-none transition-all ${
             aspectRatio === 'fill' ? 'object-cover' : 'object-contain'
           }`}
           loop={isLooping}
@@ -1268,6 +1845,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             />
           )}
         </video>
+        );
+      })()}
       </div>
 
       {/* Invisible Touch/Click Layer for gestures & tap-to-toggle */}
@@ -1346,7 +1925,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Double Tap Seek Feedback Ripple Animations */}
       {seekFeedback && (
-        <div className="absolute inset-0 z-25 pointer-events-none flex items-center justify-between px-6 sm:px-16">
+        <div className="absolute inset-0 z-[25] pointer-events-none flex items-center justify-between px-6 sm:px-16">
           {seekFeedback.direction === 'left' && (
             <div className="flex flex-col items-center gap-0.5 sm:gap-1 bg-black/80 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-3 rounded-xl sm:rounded-2xl border border-white/20 text-amber-400 animate-pulse shadow-2xl">
               <RotateCcw className="w-5 h-5 sm:w-7 sm:h-7 animate-spin-once" />
@@ -1363,17 +1942,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Center Buffering Spinner (only when playing and buffering) */}
-      {isWaiting && isPlaying && (
+      {/* Center Buffering Spinner (only when playing and buffering, never over error modal) */}
+      {isWaiting && isPlaying && !hasPlaybackError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-30">
           <div className="flex flex-col items-center justify-center bg-black/50 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-2xl animate-fade-in">
-            <div className="w-10 h-10 sm:w-14 sm:h-14 border-3 sm:border-4 border-zinc-700/60 border-t-amber-400 rounded-full animate-spin shadow-xl" />
+            <div className="w-10 h-10 sm:w-14 sm:h-14 border-[3px] sm:border-4 border-zinc-700/60 border-t-amber-400 rounded-full animate-spin shadow-xl" />
           </div>
         </div>
       )}
 
       {/* Central Play / Pause Button */}
-      {(!isPlaying || showControls) && !(isWaiting && isPlaying) && (
+      {!hasPlaybackError && (!isPlaying || showControls) && !(isWaiting && isPlaying) && (
         <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-fade-in">
           <button
             onClick={(e) => {
@@ -1381,7 +1960,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               togglePlay();
             }}
             title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-            className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-amber-400 hover:bg-amber-300 text-black flex items-center justify-center shadow-[0_0_30px_rgba(251,191,36,0.35)] hover:scale-105 active:scale-95 transition-all pointer-events-auto cursor-pointer border-2 border-amber-300/60"
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-amber-400 hover:bg-amber-300 text-black flex items-center justify-center shadow-[0_0_30px_rgba(251,191,36,0.35)] hover:scale-105 active:scale-95 transition-all pointer-events-auto cursor-pointer border-2 border-amber-300/60"
           >
             {isPlaying ? (
               <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
@@ -1392,20 +1971,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Codec Error Overlay for HEVC / H.265 / Unsupported Browser Codec */}
+      {/* Codec / Stream Error Overlay */}
       {hasPlaybackError && (
-        <div className="absolute inset-0 z-45 bg-zinc-950/95 backdrop-blur-lg flex flex-col items-center justify-center p-4 text-center animate-fade-in pointer-events-auto">
+        <div className="absolute inset-0 z-50 bg-zinc-950/95 backdrop-blur-lg flex flex-col items-center justify-center p-4 text-center animate-fade-in pointer-events-auto">
           <div className="max-w-md bg-zinc-900 border border-amber-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
             <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
               <AlertCircle className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white mb-1">Codec Not Supported by Browser</h3>
+              <h3 className="text-base font-bold text-white mb-1">
+                {playbackErrorKind === 'network'
+                  ? 'Stream Connection Interrupted'
+                  : 'Codec Not Supported by Browser'}
+              </h3>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                This video was encoded with <span className="text-amber-300 font-semibold">HEVC (H.265) / High Profile</span>, which desktop web browsers (Chrome/Brave) cannot decode inside HTML5. The file on B2 storage is 100% intact.
+                {playbackErrorKind === 'network' ? (
+                  'The storage stream timed out or expired during playback. Retry to resume from your current timestamp.'
+                ) : (
+                  <>
+                    This video was encoded with <span className="text-amber-300 font-semibold">HEVC (H.265) / High Profile</span>, which desktop web browsers (Chrome/Brave) cannot decode inside HTML5. The file on B2 storage is 100% intact.
+                  </>
+                )}
               </p>
             </div>
-            <div className="flex items-center justify-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+              <button
+                onClick={handleManualRetry}
+                className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-white text-xs font-semibold rounded-xl transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                <span>Retry Stream</span>
+              </button>
               <button
                 onClick={async () => {
                   try {
@@ -1591,7 +2187,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     onSeek={handleDirectSeek}
                     maxBufferAhead={120}
                     contactSheetUrl={contactSheetUrl}
-                    videoSrc={activeSrc}
+                    videoSrc={activeSrc.startsWith('/api/stream-proxy') && playbackNonce > 0 ? `${activeSrc.replace(/&_r=\d+/, '')}&_r=${playbackNonce}` : activeSrc}
                     thumbnailUrl={video.thumbnailUrl}
                     chapters={chapters}
                     bookmarks={bookmarks}
@@ -1688,7 +2284,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   step={0.05}
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="w-14 sm:w-18 h-1.5 hidden sm:block accent-amber-400 cursor-pointer"
+                  className="w-14 sm:w-[72px] h-1.5 hidden sm:block accent-amber-400 cursor-pointer"
                   title="Volume"
                 />
               </div>

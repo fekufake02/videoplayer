@@ -208,12 +208,45 @@ export const getLibraryHome = async (req: AuthenticatedRequest, res: Response): 
       ]);
     }
 
+    const populateThumbnails = async (docs: any[]) => {
+      return Promise.all(
+        docs.map(async (v) => {
+          const obj = typeof v.toObject === 'function' ? v.toObject() : { ...v };
+          if (obj._id) {
+            obj._id = obj._id.toString();
+          }
+          if (v.thumbnailKey) {
+            try {
+              (obj as any).thumbnailUrl = await b2Service.getPresignedThumbnailUrl(
+                v.thumbnailKey,
+                v.thumbnailStorageAccount || v.storageAccount || 'account2',
+                7200
+              );
+            } catch (e) {}
+          }
+          return obj;
+        })
+      );
+    };
+
+    const [
+      populatedContinueWatching,
+      populatedRecentlyWatched,
+      populatedMostWatched,
+      populatedRecentlyAdded,
+    ] = await Promise.all([
+      populateThumbnails(continueWatching),
+      populateThumbnails(recentlyWatched),
+      populateThumbnails(mostWatched),
+      populateThumbnails(recentlyAdded),
+    ]);
+
     res.status(200).json({
       success: true,
-      continueWatching,
-      recentlyWatched,
-      mostWatched,
-      recentlyAdded,
+      continueWatching: populatedContinueWatching,
+      recentlyWatched: populatedRecentlyWatched,
+      mostWatched: populatedMostWatched,
+      recentlyAdded: populatedRecentlyAdded,
     });
   } catch (error) {
     console.error('Get library home error:', error);
@@ -403,10 +436,10 @@ export const getVideoDetails = async (req: AuthenticatedRequest, res: Response):
     const obj = video.toObject();
     if (video.thumbnailKey) {
       try {
-        (obj as any).thumbnailUrl = await b2Service.getPresignedStreamUrl(
+        (obj as any).thumbnailUrl = await b2Service.getPresignedThumbnailUrl(
           video.thumbnailKey,
-          3600,
-          video.thumbnailStorageAccount || video.storageAccount || 'account2'
+          video.thumbnailStorageAccount || video.storageAccount || 'account2',
+          7200
         );
       } catch (e) {}
     }
@@ -522,12 +555,16 @@ export const getStreamUrl = async (req: AuthenticatedRequest, res: Response): Pr
       }
     }
 
-    const streamUrl = await b2Service.getPresignedStreamUrl(video.storageKey, 900, accountToUse);
+    const streamUrl = await b2Service.getPresignedStreamUrl(video.storageKey, 3600, accountToUse);
     let thumbnailUrl: string | undefined = undefined;
 
     if (video.thumbnailKey) {
       try {
-        thumbnailUrl = await b2Service.getPresignedStreamUrl(video.thumbnailKey, 3600, accountToUse);
+        thumbnailUrl = await b2Service.getPresignedThumbnailUrl(
+          video.thumbnailKey,
+          video.thumbnailStorageAccount || accountToUse,
+          7200
+        );
       } catch (e) {}
     }
 
@@ -556,11 +593,21 @@ export const getDownloadUrl = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
+    let accountToUse: StorageAccount = video.storageAccount || 'account2';
+    const existsInTarget = await b2Service.checkObjectExists(video.storageKey, accountToUse);
+    if (!existsInTarget) {
+      const altAccount: StorageAccount = accountToUse === 'account2' ? 'account1' : 'account2';
+      const existsInAlt = await b2Service.checkObjectExists(video.storageKey, altAccount);
+      if (existsInAlt) {
+        accountToUse = altAccount;
+      }
+    }
+
     const downloadUrl = await b2Service.getPresignedDownloadUrl(
       video.storageKey,
       video.originalFilename,
-      900,
-      video.storageAccount || 'account1'
+      3600,
+      accountToUse
     );
 
     res.status(200).json({

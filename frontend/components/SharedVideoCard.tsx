@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
-import { IVideo, IDriveVideo } from '../types';
+import { IVideo, IDriveVideo, ICollection, IPlaylist } from '../types';
 import {
   Play,
   Heart,
@@ -72,19 +72,54 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
   const [showMenu, setShowMenu] = useState(false);
   const [showCollectionSubmenu, setShowCollectionSubmenu] = useState(false);
   const [showPlaylistSubmenu, setShowPlaylistSubmenu] = useState(false);
+  const [collections, setCollections] = useState<ICollection[]>([]);
+  const [playlists, setPlaylists] = useState<IPlaylist[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(video.thumbnailUrl || null);
+  const [driveThumbTriedProxy, setDriveThumbTriedProxy] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // Synchronize thumbnail and favorite states when video prop changes (e.g. Recently Viewed, filtering)
+  // Synchronize thumbnail and favorite states when video prop changes
   useEffect(() => {
     setThumbnailUrl(video.thumbnailUrl || null);
+    setDriveThumbTriedProxy(false);
     setImageLoaded(false);
     setImageError(false);
     setIsFavorite(Boolean(video.favorite));
   }, [video._id, video.thumbnailUrl, video.favorite]);
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!showMenu) return;
+    setCollections(getStoredCollections());
+    setPlaylists(getStoredPlaylists());
+
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+        setShowCollectionSubmenu(false);
+        setShowPlaylistSubmenu(false);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowMenu(false);
+        setShowCollectionSubmenu(false);
+        setShowPlaylistSubmenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [showMenu]);
 
   const isDrive = sourceType === 'drive';
   const watchHref = isDrive ? `/drive/watch/${video._id}` : `/watch/${video._id}`;
@@ -148,7 +183,15 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
     const next = !isFavorite;
     setIsFavorite(next);
     if (isDrive) {
-      if (onFavoriteToggle) onFavoriteToggle(video._id, next);
+      if (onFavoriteToggle) {
+        onFavoriteToggle(video._id, next);
+      } else {
+        try {
+          await api.updateDriveVideoMetadata(video._id, { favorite: next });
+        } catch {
+          setIsFavorite(!next);
+        }
+      }
     } else {
       try {
         const res = await api.toggleFavorite(video._id);
@@ -168,9 +211,20 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
     try {
       if (isDrive) {
         const driveV = video as IDriveVideo;
-        const dlUrl = driveV.driveStreamUrl || driveV.driveViewUrl;
+        const dlUrl =
+          driveV.driveFileId && !driveV.driveFileId.startsWith('drive-')
+            ? `/api/drive/videos/${driveV.driveFileId}/chunk-stream`
+            : driveV.driveStreamUrl || driveV.driveViewUrl;
         if (dlUrl) {
-          window.open(dlUrl, '_blank');
+          const a = document.createElement('a');
+          a.href = dlUrl;
+          a.download = video.originalFilename || `${video.title || 'drive-video'}.mp4`;
+          a.rel = 'noopener noreferrer';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            if (document.body.contains(a)) document.body.removeChild(a);
+          }, 150);
         }
       } else {
         const res = await api.getDownloadUrl(video._id);
@@ -218,9 +272,6 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
     if (onPlay) onPlay(video);
   };
 
-  const collections = getStoredCollections();
-  const playlists = getStoredPlaylists();
-
   return (
     <div
       id={`${sourceType}-video-card-${video._id}`}
@@ -252,14 +303,21 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
               </span>
             </div>
 
-            {/* Drive Thumbnail Image */}
-            {video.thumbnailUrl && !imageError && (
+            {/* Drive Thumbnail Image with proxy fallback */}
+            {thumbnailUrl && !imageError && (
               <img
-                src={video.thumbnailUrl}
+                src={thumbnailUrl}
                 alt={video.title}
                 referrerPolicy="no-referrer"
                 onLoad={() => setImageLoaded(true)}
-                onError={() => setImageError(true)}
+                onError={() => {
+                  if (!driveThumbTriedProxy && thumbnailUrl.startsWith('http')) {
+                    setDriveThumbTriedProxy(true);
+                    setThumbnailUrl(`/api/stream-proxy?url=${encodeURIComponent(thumbnailUrl)}`);
+                  } else {
+                    setImageError(true);
+                  }
+                }}
                 className={`absolute inset-0 w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.025] ${
                   imageLoaded ? 'opacity-100' : 'opacity-0'
                 }`}
@@ -372,7 +430,7 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
             </Link>
 
             {/* Menu Trigger */}
-            <div className="relative shrink-0">
+            <div ref={menuRef} className="relative shrink-0">
               <button
                 onClick={(e) => {
                   e.preventDefault();
@@ -388,15 +446,10 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                 <MoreVertical className="w-3.5 h-3.5" />
               </button>
 
-              {/* Context Menu Dropdown (180-220px wide) */}
+              {/* Context Menu Dropdown */}
               {showMenu && (
                 <div
-                  onMouseLeave={() => {
-                    setShowMenu(false);
-                    setShowCollectionSubmenu(false);
-                    setShowPlaylistSubmenu(false);
-                  }}
-                  className="absolute right-0 top-7 z-40 w-48 bg-[#1D2230] border border-white/[0.09] rounded-xl py-1 shadow-2xl text-[13px] text-[#F4F5FA] animate-fade-in"
+                  className="absolute right-0 top-8 z-40 w-52 max-h-[320px] overflow-y-auto bg-[#1D2230] border border-white/[0.09] rounded-xl py-1 shadow-2xl text-[13px] text-[#F4F5FA] animate-fade-in"
                 >
                   <Link
                     href={watchHref}
@@ -407,8 +460,8 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                     <span>{progressPct > 0 ? 'Resume Playback' : 'Play Video'}</span>
                   </Link>
 
-                  {/* Add to Collection */}
-                  <div className="relative">
+                  {/* Add to Collection (Inline Collapsible) */}
+                  <div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -421,10 +474,10 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                         <FolderPlus className="w-3.5 h-3.5 text-amber-400" />
                         <span>Add to Collection</span>
                       </div>
-                      <span className="text-[10px] text-[#73798B]">›</span>
+                      <span className={`text-[10px] text-[#73798B] transition-transform ${showCollectionSubmenu ? 'rotate-90' : ''}`}>›</span>
                     </button>
                     {showCollectionSubmenu && (
-                      <div className="absolute right-full top-0 w-44 bg-[#191D29] border border-white/[0.09] rounded-xl py-1 shadow-2xl text-xs z-50">
+                      <div className="bg-[#131620] border-y border-white/[0.06] py-1 text-xs">
                         {collections.length > 0 ? (
                           collections.map((col) => (
                             <button
@@ -433,20 +486,20 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                                 e.stopPropagation();
                                 handleAddToCollection(col.id, col.name);
                               }}
-                              className="w-full px-3 py-1.5 text-left hover:bg-white/[0.06] truncate"
+                              className="w-full pl-8 pr-3 py-1.5 text-left hover:bg-white/[0.06] text-slate-300 hover:text-white truncate"
                             >
                               {col.name}
                             </button>
                           ))
                         ) : (
-                          <div className="px-3 py-2 text-[#73798B] text-center">No collections yet</div>
+                          <div className="px-3 py-1.5 text-[#73798B] text-center">No collections yet</div>
                         )}
                       </div>
                     )}
                   </div>
 
-                  {/* Add to Playlist */}
-                  <div className="relative">
+                  {/* Add to Playlist (Inline Collapsible) */}
+                  <div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -459,10 +512,10 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                         <ListPlus className="w-3.5 h-3.5 text-cyan-400" />
                         <span>Add to Playlist</span>
                       </div>
-                      <span className="text-[10px] text-[#73798B]">›</span>
+                      <span className={`text-[10px] text-[#73798B] transition-transform ${showPlaylistSubmenu ? 'rotate-90' : ''}`}>›</span>
                     </button>
                     {showPlaylistSubmenu && (
-                      <div className="absolute right-full top-0 w-44 bg-[#191D29] border border-white/[0.09] rounded-xl py-1 shadow-2xl text-xs z-50">
+                      <div className="bg-[#131620] border-y border-white/[0.06] py-1 text-xs">
                         {playlists.length > 0 ? (
                           playlists.map((pl) => (
                             <button
@@ -471,13 +524,13 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                                 e.stopPropagation();
                                 handleAddToPlaylist(pl.id, pl.name);
                               }}
-                              className="w-full px-3 py-1.5 text-left hover:bg-white/[0.06] truncate"
+                              className="w-full pl-8 pr-3 py-1.5 text-left hover:bg-white/[0.06] text-slate-300 hover:text-white truncate"
                             >
                               {pl.name}
                             </button>
                           ))
                         ) : (
-                          <div className="px-3 py-2 text-[#73798B] text-center">No playlists yet</div>
+                          <div className="px-3 py-1.5 text-[#73798B] text-center">No playlists yet</div>
                         )}
                       </div>
                     )}

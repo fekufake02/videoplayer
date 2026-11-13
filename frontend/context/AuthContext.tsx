@@ -51,13 +51,40 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const LOCK_KEY = 'vault_locked';
+const UNLOCKED_KEY = 'vault_unlocked';
+const PRIVACY_KEY = 'vault_privacy_active';
+const DECOY_KEY = 'vault_decoy_active';
+
+function setSecurityFlag(key: string, active: boolean) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (active) {
+      sessionStorage.setItem(key, 'true');
+      localStorage.setItem(key, 'true');
+    } else {
+      sessionStorage.removeItem(key);
+      localStorage.removeItem(key);
+    }
+  } catch {}
+}
+
+function hasSecurityFlag(key: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(key) === 'true' || localStorage.getItem(key) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [user, setUser] = useState<IUser | null>(null);
   const [settings, setSettings] = useState<ISettings | null>(null);
   const [isPrivacyActive, setIsPrivacyActive] = useState<boolean>(false);
-  const [isLocked, setIsLocked] = useState<boolean>(true);
+  const [isLocked, setIsLocked] = useState<boolean>(false);
 
   // Decoy Mode State
   const [isDecoyActive, setIsDecoyActive] = useState<boolean>(false);
@@ -78,6 +105,59 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
 
+  // Synchronously restore lock / privacy / decoy state on client mount before auth check finishes
+  // so locked or privacy-shielded reloads never flash private content for even a single frame.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isLoginRoute = window.location.pathname === '/login';
+    const hasToken = !!localStorage.getItem('metime_auth_token');
+
+    if (
+      !isLoginRoute &&
+      (hasToken || hasSecurityFlag(LOCK_KEY) || hasSecurityFlag(PRIVACY_KEY) || hasSecurityFlag(DECOY_KEY))
+    ) {
+      if (hasSecurityFlag(DECOY_KEY)) {
+        setIsDecoyActive(true);
+      }
+      if (hasSecurityFlag(LOCK_KEY)) {
+        setIsLocked(true);
+        setIsPrivacyActive(true);
+      } else if (hasSecurityFlag(PRIVACY_KEY)) {
+        setIsPrivacyActive(true);
+      }
+    }
+  }, []);
+
+  // Cross-tab synchronization for lock / privacy / decoy changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleStorageSync = (e: StorageEvent) => {
+      if (e.key === LOCK_KEY) {
+        const locked = e.newValue === 'true';
+        setIsLocked(locked);
+        if (locked) {
+          setIsPrivacyActive(true);
+        } else if (!hasSecurityFlag(PRIVACY_KEY)) {
+          setIsPrivacyActive(false);
+        }
+      } else if (e.key === PRIVACY_KEY) {
+        if (!hasSecurityFlag(LOCK_KEY)) {
+          setIsPrivacyActive(e.newValue === 'true');
+        }
+      } else if (e.key === DECOY_KEY) {
+        setIsDecoyActive(e.newValue === 'true');
+      } else if (e.key === 'metime_auth_token' && !e.newValue) {
+        setIsAuthenticated(false);
+        setUser(null);
+        setIsLocked(false);
+        setIsPrivacyActive(false);
+        setIsDecoyActive(false);
+      }
+    };
+    window.addEventListener('storage', handleStorageSync);
+    return () => window.removeEventListener('storage', handleStorageSync);
+  }, []);
+
   const checkAuth = useCallback(async (isInitialColdMount = false) => {
     try {
       const data = await api.getMe();
@@ -85,18 +165,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsAuthenticated(true);
         setUser(data.user);
         if (data.settings) setSettings(data.settings);
-        // Only on initial cold load / mount should it be locked (unless on /login)
-        if (isInitialColdMount) {
-          const isSessionUnlocked = typeof window !== 'undefined' && (
-            sessionStorage.getItem('vault_unlocked') === 'true' ||
-            localStorage.getItem('vault_unlocked') === 'true'
-          );
-          if (!isSessionUnlocked && window.location.pathname !== '/login') {
+
+        if (isInitialColdMount && typeof window !== 'undefined') {
+          const isLoginRoute = window.location.pathname === '/login';
+          const explicitlyLocked = hasSecurityFlag(LOCK_KEY);
+          const privacyActive = hasSecurityFlag(PRIVACY_KEY);
+          const decoyActive = hasSecurityFlag(DECOY_KEY);
+          const isSessionUnlocked = hasSecurityFlag(UNLOCKED_KEY);
+
+          setIsDecoyActive(decoyActive);
+
+          if (!isLoginRoute && (explicitlyLocked || !isSessionUnlocked)) {
             setIsLocked(true);
             setIsPrivacyActive(true);
+            setSecurityFlag(LOCK_KEY, true);
+            setSecurityFlag(UNLOCKED_KEY, false);
           } else {
             setIsLocked(false);
-            setIsPrivacyActive(false);
+            setIsPrivacyActive(privacyActive);
           }
         }
       } else {
@@ -104,19 +190,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
         setIsLocked(false);
         setIsPrivacyActive(false);
-        sessionStorage.removeItem('vault_unlocked');
-        if (window.location.pathname !== '/login') {
+        setIsDecoyActive(false);
+        setSecurityFlag(UNLOCKED_KEY, false);
+        setSecurityFlag(LOCK_KEY, false);
+        setSecurityFlag(PRIVACY_KEY, false);
+        setSecurityFlag(DECOY_KEY, false);
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           router.push('/login');
         }
       }
     } catch (error) {
-      setIsAuthenticated(false);
-      setUser(null);
-      setIsLocked(false);
-      setIsPrivacyActive(false);
-      sessionStorage.removeItem('vault_unlocked');
-      if (window.location.pathname !== '/login') {
-        router.push('/login');
+      // Preserve explicit lock/privacy/decoy overlay and auth state on transient errors if token or flags exist;
+      // real 401 responses already fire 'app:unauthorized' from api.ts.
+      const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('metime_auth_token');
+      const hasLockFlag = hasSecurityFlag(LOCK_KEY);
+      const hasPrivacyFlag = hasSecurityFlag(PRIVACY_KEY);
+      const hasDecoyFlag = hasSecurityFlag(DECOY_KEY);
+      if (hasToken || hasLockFlag || hasPrivacyFlag || hasDecoyFlag) {
+        setIsAuthenticated(true);
+        if (hasDecoyFlag) setIsDecoyActive(true);
+        if (hasLockFlag) {
+          setIsLocked(true);
+          setIsPrivacyActive(true);
+        } else if (hasPrivacyFlag) {
+          setIsPrivacyActive(true);
+        }
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        setIsLocked(false);
+        setIsPrivacyActive(false);
+        setIsDecoyActive(false);
+        setSecurityFlag(UNLOCKED_KEY, false);
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          router.push('/login');
+        }
       }
     } finally {
       setIsLoading(false);
@@ -135,7 +243,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
       setIsLocked(false);
       setIsPrivacyActive(false);
-      sessionStorage.removeItem('vault_unlocked');
+      setIsDecoyActive(false);
+      setSecurityFlag(UNLOCKED_KEY, false);
+      setSecurityFlag(LOCK_KEY, false);
+      setSecurityFlag(PRIVACY_KEY, false);
+      setSecurityFlag(DECOY_KEY, false);
       if (pathname !== '/login') {
         router.push('/login');
       }
@@ -153,8 +265,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (data.settings) setSettings(data.settings);
       setIsLocked(false);
       setIsPrivacyActive(false);
-      sessionStorage.setItem('vault_unlocked', 'true');
-      localStorage.setItem('vault_unlocked', 'true');
+      setIsDecoyActive(false);
+      setSecurityFlag(LOCK_KEY, false);
+      setSecurityFlag(PRIVACY_KEY, false);
+      setSecurityFlag(DECOY_KEY, false);
+      setSecurityFlag(UNLOCKED_KEY, true);
       if (pathname === '/login') {
         router.push('/');
       }
@@ -171,8 +286,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
       setIsPrivacyActive(false);
       setIsLocked(false);
-      sessionStorage.removeItem('vault_unlocked');
-      localStorage.removeItem('vault_unlocked');
+      setIsDecoyActive(false);
+      setSecurityFlag(UNLOCKED_KEY, false);
+      setSecurityFlag(LOCK_KEY, false);
+      setSecurityFlag(PRIVACY_KEY, false);
+      setSecurityFlag(DECOY_KEY, false);
       router.push('/login');
     }
   };
@@ -204,38 +322,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const togglePrivacyMode = useCallback(() => {
+    if (isLocked || hasSecurityFlag(LOCK_KEY)) return; // Do not toggle privacy shield down while hard-locked
     setIsPrivacyActive((prev) => {
       const next = !prev;
+      setSecurityFlag(PRIVACY_KEY, next);
       if (next) triggerPrivacyLockout();
       return next;
     });
-  }, [triggerPrivacyLockout]);
+  }, [isLocked, triggerPrivacyLockout]);
 
   const setPrivacyMode = useCallback((active: boolean) => {
+    if (!active && (isLocked || hasSecurityFlag(LOCK_KEY))) return;
     setIsPrivacyActive(active);
+    setSecurityFlag(PRIVACY_KEY, active);
     if (active) triggerPrivacyLockout();
-  }, [triggerPrivacyLockout]);
+  }, [isLocked, triggerPrivacyLockout]);
 
   const lockApp = useCallback(() => {
     setIsLocked(true);
     setIsPrivacyActive(true);
-    sessionStorage.removeItem('vault_unlocked');
-    localStorage.removeItem('vault_unlocked');
+    setSecurityFlag(LOCK_KEY, true);
+    setSecurityFlag(PRIVACY_KEY, true);
+    setSecurityFlag(UNLOCKED_KEY, false);
     triggerPrivacyLockout();
   }, [triggerPrivacyLockout]);
 
   const unlockApp = useCallback(() => {
     setIsLocked(false);
     setIsPrivacyActive(false);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('vault_unlocked', 'true');
-      localStorage.setItem('vault_unlocked', 'true');
-    }
+    setSecurityFlag(LOCK_KEY, false);
+    setSecurityFlag(PRIVACY_KEY, false);
+    setSecurityFlag(UNLOCKED_KEY, true);
   }, []);
 
   // Decoy Mode Controls
   const enterDecoyMode = useCallback(() => {
     setIsDecoyActive(true);
+    setSecurityFlag(DECOY_KEY, true);
     triggerPrivacyLockout();
   }, [triggerPrivacyLockout]);
 
@@ -245,6 +368,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsDecoyActive(false);
       setIsLocked(false);
       setIsPrivacyActive(false);
+      setSecurityFlag(DECOY_KEY, false);
+      setSecurityFlag(LOCK_KEY, false);
+      setSecurityFlag(PRIVACY_KEY, false);
+      setSecurityFlag(UNLOCKED_KEY, true);
       return true;
     }
     // Alternatively accept master login
@@ -253,6 +380,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsDecoyActive(false);
         setIsLocked(false);
         setIsPrivacyActive(false);
+        setSecurityFlag(DECOY_KEY, false);
+        setSecurityFlag(LOCK_KEY, false);
+        setSecurityFlag(PRIVACY_KEY, false);
+        setSecurityFlag(UNLOCKED_KEY, true);
       })
       .catch(() => {});
     return false;
@@ -357,7 +488,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // Biometric assertion verified on platform authenticator
         setIsLocked(false);
         setIsPrivacyActive(false);
+        setIsDecoyActive(false);
         setIsAuthenticated(true);
+        setSecurityFlag(LOCK_KEY, false);
+        setSecurityFlag(PRIVACY_KEY, false);
+        setSecurityFlag(DECOY_KEY, false);
+        setSecurityFlag(UNLOCKED_KEY, true);
+        checkAuth(false).catch(() => {});
         if (pathname === '/login') {
           router.push('/');
         }
@@ -473,6 +610,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
+      if (!isAuthenticated || pathname === '/login') return;
+
       // Emergency Lock: Ctrl + Shift + L or Shift + L
       if (e.key.toUpperCase() === 'L' && (e.ctrlKey || e.shiftKey)) {
         e.preventDefault();
@@ -480,8 +619,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      // Privacy Mode Toggle: P
-      if (e.key.toUpperCase() === 'P' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // Privacy Mode Toggle: P (disabled while hard-locked)
+      if (!isLocked && e.key.toUpperCase() === 'P' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault();
         togglePrivacyMode();
         return;
@@ -490,7 +629,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lockApp, togglePrivacyMode, enterDecoyMode, decoyConfig, settings?.keyboardShortcuts]);
+  }, [lockApp, togglePrivacyMode, enterDecoyMode, decoyConfig, settings?.keyboardShortcuts, isAuthenticated, isLocked, pathname]);
 
   return (
     <AuthContext.Provider

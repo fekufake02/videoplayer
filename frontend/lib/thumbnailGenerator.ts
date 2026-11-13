@@ -650,3 +650,140 @@ export async function generateAndUploadDriveThumbnail(
   }
 }
 
+/**
+ * Extract a real decoded frame canvas using same-origin Range proxy when external,
+ * returning null if the browser cannot decode the stream (never returns synthetic fallback).
+ */
+export async function extractRealVideoFrameCanvas(
+  videoUrl: string,
+  timestamp: number = 8
+): Promise<HTMLCanvasElement | null> {
+  if (typeof document === 'undefined' || !videoUrl) return null;
+
+  const effectiveUrl =
+    videoUrl.startsWith('http://') || videoUrl.startsWith('https://')
+      ? `/api/stream-proxy?url=${encodeURIComponent(videoUrl)}`
+      : videoUrl;
+
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.autoplay = false;
+
+    video.style.position = 'fixed';
+    video.style.top = '-9999px';
+    video.style.left = '-9999px';
+    video.style.width = '320px';
+    video.style.height = '180px';
+    video.style.opacity = '0';
+    video.style.pointerEvents = 'none';
+
+    try {
+      document.body?.appendChild(video);
+    } catch {}
+
+    let timeoutId: NodeJS.Timeout | null = null;
+    let resolved = false;
+    let hasSeekAttempted = false;
+
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      video.removeEventListener('loadedmetadata', handleMetadata);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('error', handleError);
+      try {
+        if (video.parentNode) video.parentNode.removeChild(video);
+      } catch {}
+      try {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      } catch {}
+    };
+
+    const capture = (): boolean => {
+      if (resolved) return true;
+      if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return false;
+      try {
+        const targetW = 480;
+        const targetH = Math.max(180, Math.round((video.videoHeight / video.videoWidth) * targetW));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return false;
+        ctx.drawImage(video, 0, 0, targetW, targetH);
+        const test = canvas.toDataURL('image/webp', 0.8);
+        if (!test || test.length < 200) return false;
+        resolved = true;
+        cleanup();
+        resolve(canvas);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const handleMetadata = () => {
+      if (hasSeekAttempted) return;
+      hasSeekAttempted = true;
+      const dur = video.duration;
+      let target = timestamp;
+      if (dur && isFinite(dur) && dur > 0) {
+        target = dur >= timestamp + 2 ? timestamp : Math.max(0.5, dur * 0.2);
+      } else {
+        target = 1;
+      }
+      try {
+        video.currentTime = target;
+      } catch {
+        capture();
+      }
+    };
+
+    const handleSeeked = () => {
+      if (!capture()) {
+        setTimeout(() => {
+          if (!capture() && !resolved) {
+            resolved = true;
+            cleanup();
+            resolve(null);
+          }
+        }, 250);
+      }
+    };
+
+    const handleLoadedData = () => {
+      if (!hasSeekAttempted) handleMetadata();
+    };
+
+    const handleError = () => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(null);
+    };
+
+    timeoutId = setTimeout(() => {
+      if (resolved) return;
+      if (!capture()) {
+        resolved = true;
+        cleanup();
+        resolve(null);
+      }
+    }, 10000);
+
+    video.addEventListener('loadedmetadata', handleMetadata);
+    video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('error', handleError);
+
+    video.src = effectiveUrl;
+    video.load();
+  });
+}
+

@@ -73,18 +73,19 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
   const isDrivePage = pathname.startsWith('/drive');
   const isSettingsPage = pathname.startsWith('/settings');
 
-  // Persisted collapse state on desktop
-  const [internalCollapsed, setInternalCollapsed] = useState<boolean>(() => {
-    if (propIsCollapsed !== undefined) return propIsCollapsed;
-    return getStoredSidebarCollapsed();
-  });
+  // Persisted collapse state on desktop (hydration-safe)
+  const [internalCollapsed, setInternalCollapsed] = useState<boolean>(
+    propIsCollapsed !== undefined ? propIsCollapsed : false
+  );
 
-  const [collectionsCount, setCollectionsCount] = useState<number>(() => getStoredCollections().length);
-  const [playlistsCount, setPlaylistsCount] = useState<number>(() => getStoredPlaylists().length);
+  const [collectionsCount, setCollectionsCount] = useState<number>(0);
+  const [playlistsCount, setPlaylistsCount] = useState<number>(0);
 
   useEffect(() => {
     if (propIsCollapsed !== undefined) {
       setInternalCollapsed(propIsCollapsed);
+    } else {
+      setInternalCollapsed(getStoredSidebarCollapsed());
     }
   }, [propIsCollapsed]);
 
@@ -102,13 +103,16 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
 
   // Listen for collection/playlist updates to refresh counts live
   useEffect(() => {
-    const handleCols = () => setCollectionsCount(getStoredCollections().length);
-    const handlePls = () => setPlaylistsCount(getStoredPlaylists().length);
-    window.addEventListener('vault:collections-updated', handleCols);
-    window.addEventListener('vault:playlists-updated', handlePls);
+    const syncCounts = () => {
+      setCollectionsCount(getStoredCollections().length);
+      setPlaylistsCount(getStoredPlaylists().length);
+    };
+    syncCounts();
+    window.addEventListener('vault:collections-updated', syncCounts);
+    window.addEventListener('vault:playlists-updated', syncCounts);
     return () => {
-      window.removeEventListener('vault:collections-updated', handleCols);
-      window.removeEventListener('vault:playlists-updated', handlePls);
+      window.removeEventListener('vault:collections-updated', syncCounts);
+      window.removeEventListener('vault:playlists-updated', syncCounts);
     };
   }, []);
 
@@ -140,7 +144,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
   }, [isMobileDrawerOpen, onCloseMobileDrawer]);
 
   const navItemClass = (isActive: boolean) =>
-    `relative flex items-center gap-3 px-3 h-9 sm:h-9.5 rounded-[8px] text-[13px] font-medium transition-all group cursor-pointer focus-visible:outline-accent ${
+    `relative flex items-center gap-3 px-3 h-9 rounded-[8px] text-[13px] font-medium transition-all group cursor-pointer focus-visible:outline-accent ${
       isActive
         ? 'bg-[rgba(129,140,248,0.12)] text-[#A5B4FC] font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r before:bg-[#818CF8]'
         : 'text-[#A1A6B5] hover:text-[#F4F5FA] hover:bg-[#191D29]'
@@ -156,12 +160,12 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
   };
 
   const renderNavContent = () => (
-    <div className="flex flex-col h-full justify-between select-none py-1 overflow-y-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-      <div className="space-y-3.5">
+    <div className="flex flex-col h-full justify-between select-none py-0.5 overflow-hidden">
+      <div className="space-y-2.5">
         {/* Main Section */}
         <div className="space-y-0.5">
           {!isCollapsed && (
-            <div className="px-3 pb-1 text-[10px] font-semibold text-[#73798B] uppercase tracking-wider">
+            <div className="px-3 pb-0.5 text-[10px] font-semibold text-[#73798B] uppercase tracking-wider">
               Library
             </div>
           )}
@@ -192,7 +196,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
               <div className="flex items-center justify-between w-full">
                 <span>Continue Watching</span>
                 {counts.continue !== undefined && counts.continue > 0 && (
-                  <span className="text-xs font-mono px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 tabular-nums">
+                  <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 tabular-nums">
                     {counts.continue}
                   </span>
                 )}
@@ -364,7 +368,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
     <>
       {/* Desktop Fixed Sidebar */}
       <aside
-        className={`hidden lg:flex flex-col bg-[#0C0E15] border-r border-white/[0.06] p-2.5 transition-all duration-200 shrink-0 sticky top-16 h-[calc(100vh-4rem)] max-h-[calc(100vh-4rem)] overflow-hidden z-30 ${
+        className={`hidden lg:flex flex-col bg-[#0C0E15] border-r border-white/[0.06] p-2.5 transition-all duration-200 shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] max-h-[calc(100vh-3.5rem)] overflow-hidden z-30 ${
           isCollapsed ? 'w-[72px]' : 'w-[240px]'
         }`}
       >
@@ -396,7 +400,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex-1 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 {renderNavContent()}
               </div>
             </div>

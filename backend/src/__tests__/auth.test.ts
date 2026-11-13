@@ -1,33 +1,30 @@
 import request from 'supertest';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import app from '../server';
 import { User } from '../models/User';
 import argon2 from 'argon2';
 import { config } from '../config';
 
-let mongoServer: MongoMemoryServer;
+const testMongoUri = process.env.MONGODB_URI || config.mongoUri || 'mongodb://127.0.0.1:27017/vault_test';
 
 beforeAll(async () => {
-  mongoServer = await MongoMemoryServer.create();
-  const uri = mongoServer.getUri();
-  await mongoose.connect(uri);
+  await mongoose.connect(testMongoUri);
 
-  // Seed test user
-  const hashedPassword = await argon2.hash('testpassword123', {
-    type: argon2.argon2id,
-  });
-  await User.create({
-    username: 'admin',
-    passwordHash: hashedPassword,
-  });
+  // Seed test user if needed
+  const existing = await User.findOne({ username: 'admin' });
+  if (!existing) {
+    const hashedPassword = await argon2.hash('testpassword123', {
+      type: argon2.argon2id,
+    });
+    await User.create({
+      username: 'admin',
+      passwordHash: hashedPassword,
+    });
+  }
 }, 180000);
 
 afterAll(async () => {
   await mongoose.disconnect();
-  if (mongoServer) {
-    await mongoServer.stop();
-  }
 });
 
 describe('Authentication & Authorization Security API', () => {

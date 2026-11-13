@@ -250,8 +250,15 @@ export class DriveService {
       let existing = await DriveVideo.findOne({ driveFileId: item.driveFileId });
 
       if (existing) {
-        existing.title = existing.title || item.title;
+        if (!existing.customTitle) {
+          existing.title = item.title || existing.title;
+        }
         existing.originalFilename = existing.originalFilename || item.originalFilename;
+        if ((!existing.size || existing.size === 1024 * 1024 * 50) && item.size > 0) {
+          existing.size = item.size;
+        } else if (existing.size === 1024 * 1024 * 50 && item.size === 0) {
+          existing.size = 0;
+        }
         existing.driveStreamUrl = item.driveStreamUrl;
         existing.driveViewUrl = item.driveViewUrl;
         existing.folderId = folderId;
@@ -284,7 +291,7 @@ export class DriveService {
           title: item.title,
           originalFilename: item.originalFilename,
           mimeType: item.mimeType,
-          size: item.size || 1024 * 1024 * 50,
+          size: item.size || 0,
           duration: 0,
           thumbnailUrl: item.thumbnailUrl || `https://drive.google.com/thumbnail?id=${item.driveFileId}&sz=w1280`,
           driveViewUrl: item.driveViewUrl,
@@ -293,6 +300,7 @@ export class DriveService {
           lastSyncedAt: new Date(),
           playCount: 0,
           favorite: false,
+          customTitle: false,
         });
         resultVideos.push(created);
       }

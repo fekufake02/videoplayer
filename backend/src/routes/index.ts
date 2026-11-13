@@ -56,6 +56,7 @@ router.post('/settings/admin/update-password', requireAuth, settingsController.u
 router.get('/drive/videos', requireAuth, driveController.listDriveVideos);
 router.post('/drive/sync', requireAuth, driveController.syncDriveFolder);
 router.get('/drive/videos/:id', requireAuth, driveController.getDriveVideoDetails);
+router.patch('/drive/videos/:id', requireAuth, driveController.updateDriveVideoMetadata);
 router.post('/drive/thumbnails/upload/initiate', requireAuth, driveController.initiateDriveThumbnailUpload);
 router.post('/drive/videos/:id/thumbnail', requireAuth, driveController.attachDriveThumbnail);
 router.get('/drive/videos/:id/stream', requireAuth, driveController.getDriveStreamUrl);

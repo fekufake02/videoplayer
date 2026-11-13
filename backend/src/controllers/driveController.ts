@@ -35,9 +35,11 @@ export const listDriveVideos = async (req: AuthenticatedRequest, res: Response):
     }
 
     let sortOption: any = { createdAt: -1 };
-    if (sort === 'title') sortOption = { title: 1 };
+    if (sort === 'title' || sort === 'nameAsc') sortOption = { title: 1 };
+    else if (sort === 'nameDesc') sortOption = { title: -1 };
     else if (sort === 'oldest') sortOption = { createdAt: 1 };
     else if (sort === 'duration') sortOption = { duration: -1 };
+    else if (sort === 'size') sortOption = { size: -1 };
 
     const total = await DriveVideo.countDocuments(query);
     const videos = await DriveVideo.find(query)
@@ -145,6 +147,68 @@ export const getDriveVideoDetails = async (req: AuthenticatedRequest, res: Respo
     res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch Drive video details' },
+    });
+  }
+};
+
+/**
+ * Update metadata (title, tags, notes, favorite) for a Drive video
+ */
+export const updateDriveVideoMetadata = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { title, tags, notes, favorite } = req.body || {};
+
+    let video = await DriveVideo.findById(id).catch(() => null);
+    if (!video) {
+      video = await DriveVideo.findOne({ driveFileId: id });
+    }
+
+    if (!video) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Drive video not found' },
+      });
+      return;
+    }
+
+    if (typeof title === 'string' && title.trim()) {
+      video.title = title.trim();
+      video.customTitle = true;
+    }
+    if (Array.isArray(tags)) {
+      video.tags = tags;
+    }
+    if (typeof notes === 'string') {
+      video.notes = notes;
+    }
+    if (typeof favorite === 'boolean') {
+      video.favorite = favorite;
+    }
+
+    await video.save();
+
+    const item = video.toObject();
+    if (item.thumbnailKey) {
+      try {
+        const b2Url = await b2Service.getPresignedThumbnailUrl(
+          item.thumbnailKey,
+          item.thumbnailStorageAccount || 'account2',
+          7200
+        );
+        if (b2Url) item.thumbnailUrl = b2Url;
+      } catch {}
+    }
+
+    res.status(200).json({
+      success: true,
+      video: item,
+    });
+  } catch (error) {
+    console.error('Update Drive video metadata error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to update Drive video metadata' },
     });
   }
 };
@@ -332,16 +396,34 @@ export const streamDriveVideoChunk = async (req: Request, res: Response): Promis
       headers['Range'] = 'bytes=0-';
     }
 
-    let driveRes = await fetch(targetStreamUrl, { headers, redirect: 'follow' });
+    const abortController = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    req.on('close', () => {
+      abortController.abort();
+      if (reader) {
+        reader.cancel().catch(() => {});
+      }
+    });
+
+    let driveRes = await fetch(targetStreamUrl, {
+      headers,
+      redirect: 'follow',
+      signal: abortController.signal,
+    });
 
     const contentType = driveRes.headers.get('content-type') || '';
-    if (!driveRes.ok || contentType.includes('text/html') || driveRes.status >= 400) {
+    if ((driveRes.status !== 416 && !driveRes.ok) || contentType.includes('text/html') || (driveRes.status >= 400 && driveRes.status !== 416)) {
       if (targetStreamUrl !== reliableSample) {
-        driveRes = await fetch(reliableSample, { headers, redirect: 'follow' });
+        driveRes = await fetch(reliableSample, {
+          headers,
+          redirect: 'follow',
+          signal: abortController.signal,
+        });
       }
     }
 
-    const statusToReturn = driveRes.status === 200 && req.headers.range ? 206 : driveRes.status;
+    const hasContentRange = !!driveRes.headers.get('content-range');
+    const statusToReturn = driveRes.status === 200 && req.headers.range && hasContentRange ? 206 : driveRes.status;
     res.status(statusToReturn);
     driveRes.headers.forEach((val, key) => {
       const lower = key.toLowerCase();
@@ -349,6 +431,25 @@ export const streamDriveVideoChunk = async (req: Request, res: Response): Promis
         res.setHeader(key, val);
       }
     });
+
+    // Persist actual upstream file size if stored size is missing or placeholder 50MB
+    if (video && (!video.size || video.size === 1024 * 1024 * 50)) {
+      const cr = driveRes.headers.get('content-range');
+      const cl = driveRes.headers.get('content-length');
+      let learnedSize = 0;
+      if (cr) {
+        const slashParts = cr.split('/');
+        if (slashParts[1] && !isNaN(parseInt(slashParts[1], 10))) {
+          learnedSize = parseInt(slashParts[1], 10);
+        }
+      } else if (cl && !isNaN(parseInt(cl, 10)) && !req.headers.range) {
+        learnedSize = parseInt(cl, 10);
+      }
+      if (learnedSize > 0) {
+        video.size = learnedSize;
+        video.save().catch(() => {});
+      }
+    }
 
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -358,17 +459,27 @@ export const streamDriveVideoChunk = async (req: Request, res: Response): Promis
       return;
     }
 
-    const reader = driveRes.body.getReader();
+    reader = driveRes.body.getReader();
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
-        res.end();
+        if (!res.writableEnded) res.end();
+        break;
+      }
+      if (res.writableEnded || res.destroyed) {
+        reader.cancel().catch(() => {});
         break;
       }
       res.write(Buffer.from(value));
     }
-  } catch (error) {
-    console.error('Stream Drive video chunk error:', error);
-    res.status(500).end();
+  } catch (error: any) {
+    if (error?.name !== 'AbortError') {
+      console.error('Stream Drive video chunk error:', error);
+    }
+    if (!res.headersSent) {
+      res.status(500).end();
+    } else if (!res.writableEnded) {
+      res.end();
+    }
   }
 };

@@ -4,7 +4,7 @@ import './globals.css';
 import { AuthProvider } from '../context/AuthContext';
 import { UploadProvider } from '../context/UploadContext';
 import { PipProvider } from '../context/PipContext';
-import { PrivacyOverlay } from '../components/PrivacyOverlay';
+import { PrivacyOverlay, ProtectedContentWrapper } from '../components/PrivacyOverlay';
 import { DecoyInterfaceWrapper } from '../components/DecoyInterfaceWrapper';
 import { UploadDock } from '../components/UploadDock';
 import { UploadModal } from '../components/UploadModal';
@@ -52,7 +52,7 @@ export default function RootLayout({
             <UploadProvider>
               <PrivacyOverlay />
               <DecoyInterfaceWrapper />
-              {children}
+              <ProtectedContentWrapper>{children}</ProtectedContentWrapper>
               <UploadDock />
               <UploadModal />
             </UploadProvider>

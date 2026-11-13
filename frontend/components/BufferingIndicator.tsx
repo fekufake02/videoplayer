@@ -118,23 +118,55 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     }
   };
 
+  const [hasHoveredPreview, setHasHoveredPreview] = useState(false);
+
+  const isPreviewContainerSupported =
+    !!videoSrc && !/\.(m3u8|m2?ts|flv)(\?|$)/i.test(videoSrc);
+
+  const safePreviewSrc = (() => {
+    if (!videoSrc || !isPreviewContainerSupported) return '';
+    if (videoSrc.startsWith('/') || videoSrc.startsWith('blob:') || videoSrc.startsWith('data:')) {
+      return videoSrc;
+    }
+    if (
+      videoSrc.includes('zencdn.net') ||
+      videoSrc.includes('interactive-examples.mdn.mozilla.net') ||
+      videoSrc.includes('githubusercontent.com')
+    ) {
+      return videoSrc;
+    }
+    return `/api/stream-proxy?url=${encodeURIComponent(videoSrc)}`;
+  })();
+
+  // Reset preview frame state when source changes
+  useEffect(() => {
+    setPreviewLoaded(false);
+    setCurrentFrameTime(-1);
+    setHasHoveredPreview(false);
+    isSeekingRef.current = false;
+    pendingSeekTimeRef.current = null;
+  }, [videoSrc]);
+
+  useEffect(() => {
+    return () => {
+      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+    };
+  }, []);
+
   // Synchronize live preview video to hover timestamp
   useEffect(() => {
-    if (hoverTime === null || !videoSrc) return;
+    if (hoverTime === null || !safePreviewSrc) return;
+    if (!hasHoveredPreview) setHasHoveredPreview(true);
     const safeDuration = duration && isFinite(duration) && duration > 0 ? duration : 0;
     const target = Math.max(0, Math.min(safeDuration, hoverTime));
     seekPreviewToTime(target);
-  }, [hoverTime, duration, videoSrc, seekPreviewToTime]);
-
-  if (!duration || duration <= 0) return null;
-
-  const displayTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
-  const safeDuration = duration && isFinite(duration) && duration > 0 ? duration : 0;
-  const playedPercent = safeDuration > 0 ? Math.min(100, Math.max(0, (displayTime / safeDuration) * 100)) : 0;
+  }, [hoverTime, duration, safePreviewSrc, hasHoveredPreview, seekPreviewToTime]);
 
   const getTimeFromX = useCallback(
     (clientX: number): { time: number; pos: number } => {
-      if (!progressBarRef.current) return { time: 0, pos: 0 };
+      if (!progressBarRef.current || !duration || !isFinite(duration) || duration <= 0) {
+        return { time: 0, pos: 0 };
+      }
       const rect = progressBarRef.current.getBoundingClientRect();
       const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width));
       const ratio = rect.width > 0 ? clickX / rect.width : 0;
@@ -145,6 +177,12 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     },
     [duration]
   );
+
+  if (!duration || !isFinite(duration) || duration <= 0) return null;
+
+  const displayTime = isScrubbing && scrubTime !== null ? scrubTime : currentTime;
+  const safeDuration = duration;
+  const playedPercent = safeDuration > 0 ? Math.min(100, Math.max(0, (displayTime / safeDuration) * 100)) : 0;
 
   // Desktop Mouse Hover
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -161,7 +199,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     }
   };
 
-  // Mouse Click & Slide Scrubbing
+  // Mouse Click & Slide Scrubbing (visual 60fps preview while dragging, single clean range seek on release)
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsScrubbing(true);
@@ -169,7 +207,6 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
     setScrubTime(time);
     setHoverPosition(pos);
     setHoverTime(time);
-    onSeek(time);
 
     const onGlobalMouseMove = (moveEvent: MouseEvent) => {
       moveEvent.preventDefault();
@@ -312,17 +349,20 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
                 />
               )}
 
-              {/* Layer 3: Live Native Video Frame Preview (Decodes exact frame) */}
-              {videoSrc && (
+              {/* Layer 3: Live Native Video Frame Preview (lazy-loaded on hover so main stream is never bandwidth-starved) */}
+              {safePreviewSrc && hasHoveredPreview && (
                 <video
                   ref={previewVideoRef}
-                  src={videoSrc}
+                  src={safePreviewSrc}
                   muted
                   playsInline
-                  preload="auto"
+                  preload="metadata"
                   onLoadedMetadata={handlePreviewMetadata}
                   onSeeked={handlePreviewSeeked}
                   onLoadedData={() => setPreviewLoaded(true)}
+                  onError={() => {
+                    isSeekingRef.current = false;
+                  }}
                   className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-150 ${
                     isFrameAccurate ? 'opacity-100' : 'opacity-0'
                   }`}
@@ -432,7 +472,7 @@ export const BufferingIndicator: React.FC<BufferingIndicatorProps> = ({
             return (
               <div
                 key={bm.id}
-                className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-amber-400 border border-black z-25 pointer-events-none"
+                className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-amber-400 border border-black z-[25] pointer-events-none"
                 style={{ left: `calc(${pct}% - 3px)` }}
                 title={bm.label || `Bookmark at ${formatTimestamp(bm.timestamp)}`}
               />

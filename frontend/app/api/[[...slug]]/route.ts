@@ -618,6 +618,66 @@ function checkRequestAuth(req: NextRequest): { userId: string; username: string 
   return null;
 }
 
+async function getMongoVideosCollection() {
+  const mongoUri = process.env.MONGODB_URI;
+  const isRealMongo =
+    !!mongoUri && !mongoUri.includes('<cluster>') && !mongoUri.includes('<username>');
+  if (!isRealMongo || !mongoUri) return null;
+
+  try {
+    if (mongoose.connection.readyState === 0) {
+      mongoose.set('bufferCommands', false);
+      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
+    }
+    if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+      return mongoose.connection.db.collection('videos');
+    }
+  } catch (err: any) {
+    console.warn('MongoDB connection warning:', err?.message || err);
+  }
+  return null;
+}
+
+async function hydrateMongoVideoDoc(doc: any): Promise<IVideoItem> {
+  const vidId = doc._id ? doc._id.toString() : '';
+  let thumbUrl: string | undefined = doc.thumbnailUrl;
+  if (doc.thumbnailKey) {
+    try {
+      const b2Url = await getB2PresignedUrl(
+        doc.thumbnailKey,
+        7200,
+        doc.thumbnailStorageAccount || doc.storageAccount || 'account2'
+      );
+      if (b2Url) {
+        thumbUrl = b2Url;
+      } else if (!thumbUrl && readDiskMedia(doc.thumbnailKey)) {
+        thumbUrl = `/api/upload-receiver?key=${encodeURIComponent(doc.thumbnailKey)}`;
+      }
+    } catch {}
+  }
+  return {
+    _id: vidId,
+    title: doc.title || doc.originalFilename || 'Untitled Video',
+    originalFilename: doc.originalFilename || 'video.mp4',
+    storageKey: doc.storageKey || '',
+    thumbnailKey: doc.thumbnailKey,
+    thumbnailUrl: thumbUrl,
+    blurhash: doc.blurhash,
+    streamUrl: doc.streamUrl || `/api/videos/${vidId}/raw`,
+    mimeType: doc.mimeType || 'video/mp4',
+    size: doc.size || 0,
+    duration: doc.duration || 0,
+    createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : new Date().toISOString(),
+    updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : new Date().toISOString(),
+    lastPlayedAt: doc.lastPlayedAt ? new Date(doc.lastPlayedAt).toISOString() : undefined,
+    lastPosition: doc.lastPosition || 0,
+    playCount: doc.playCount || 0,
+    favorite: Boolean(doc.favorite),
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    notes: doc.notes || '',
+  };
+}
+
 // Router dispatcher
 export async function GET(
   req: NextRequest,
@@ -674,7 +734,105 @@ export async function GET(
       );
     }
 
-    const allVideos = Array.from(globalVideos.values());
+    const mongoUri = process.env.MONGODB_URI;
+    const isRealMongo = mongoUri && !mongoUri.includes('<cluster>') && !mongoUri.includes('<username>');
+    if (isRealMongo) {
+      try {
+        if (mongoose.connection.readyState === 0) {
+          mongoose.set('bufferCommands', false);
+          await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
+        }
+        if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+          const col = mongoose.connection.db.collection('videos');
+          const [recentlyAddedRaw, mostWatchedRaw, continueWatchingRaw, recentlyWatchedRaw] = await Promise.all([
+            col.find({}).sort({ createdAt: -1 }).limit(12).toArray(),
+            col.find({ playCount: { $gt: 0 } }).sort({ playCount: -1, lastPlayedAt: -1 }).limit(12).toArray(),
+            globalSettings.saveWatchHistory
+              ? col
+                  .find({
+                    lastPosition: { $gt: 10 },
+                    lastPlayedAt: { $exists: true, $ne: null },
+                  })
+                  .sort({ lastPlayedAt: -1 })
+                  .limit(24)
+                  .toArray()
+              : Promise.resolve([]),
+            globalSettings.saveWatchHistory
+              ? col.find({ lastPlayedAt: { $exists: true, $ne: null } }).sort({ lastPlayedAt: -1 }).limit(12).toArray()
+              : Promise.resolve([]),
+          ]);
+
+          const filteredContinue = continueWatchingRaw
+            .filter((d: any) => !d.duration || d.duration === 0 || (d.lastPosition || 0) < d.duration - 15)
+            .slice(0, 12);
+
+          const hydrateMongoDocs = async (docs: any[]) =>
+            Promise.all(
+              docs.map(async (doc: any) => {
+                const vidId = doc._id ? doc._id.toString() : '';
+                let thumbUrl = doc.thumbnailUrl;
+                if (doc.thumbnailKey) {
+                  try {
+                    const b2Url = await getB2PresignedUrl(
+                      doc.thumbnailKey,
+                      7200,
+                      doc.thumbnailStorageAccount || doc.storageAccount || 'account2'
+                    );
+                    if (b2Url) thumbUrl = b2Url;
+                  } catch {}
+                }
+                if (!thumbUrl && doc.thumbnailKey) {
+                  thumbUrl = `/api/upload-receiver?key=${encodeURIComponent(doc.thumbnailKey)}`;
+                }
+                return {
+                  _id: vidId,
+                  title: doc.title || doc.originalFilename || 'Untitled Video',
+                  originalFilename: doc.originalFilename || 'video.mp4',
+                  storageKey: doc.storageKey || '',
+                  thumbnailKey: doc.thumbnailKey,
+                  thumbnailUrl: thumbUrl,
+                  blurhash: doc.blurhash,
+                  streamUrl: doc.streamUrl || `/api/videos/${vidId}/raw`,
+                  mimeType: doc.mimeType || 'video/mp4',
+                  size: doc.size || 0,
+                  duration: doc.duration || 0,
+                  createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : new Date().toISOString(),
+                  updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : new Date().toISOString(),
+                  lastPlayedAt: doc.lastPlayedAt ? new Date(doc.lastPlayedAt).toISOString() : undefined,
+                  lastPosition: doc.lastPosition || 0,
+                  playCount: doc.playCount || 0,
+                  favorite: Boolean(doc.favorite),
+                  tags: Array.isArray(doc.tags) ? doc.tags : [],
+                  notes: doc.notes || '',
+                };
+              })
+            );
+
+          if (recentlyAddedRaw.length > 0 || filteredContinue.length > 0) {
+            const [cw, rw, mw, ra] = await Promise.all([
+              hydrateMongoDocs(filteredContinue),
+              hydrateMongoDocs(recentlyWatchedRaw),
+              hydrateMongoDocs(mostWatchedRaw),
+              hydrateMongoDocs(recentlyAddedRaw),
+            ]);
+            return NextResponse.json({
+              success: true,
+              continueWatching: cw,
+              recentlyWatched: rw,
+              mostWatched: mw,
+              recentlyAdded: ra,
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('MongoDB query warning for /api/library/home:', err?.message || err);
+      }
+    }
+
+    const allVideos = Array.from(globalVideos.values()).map((v) => {
+      repairVideoItem(v);
+      return v;
+    });
 
     const recentlyAdded = [...allVideos]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -690,7 +848,7 @@ export async function GET(
 
     if (globalSettings.saveWatchHistory) {
       continueWatching = [...allVideos]
-        .filter((v) => v.lastPosition > 10 && v.lastPlayedAt)
+        .filter((v) => v.lastPosition > 10 && v.lastPlayedAt && (!v.duration || v.lastPosition < v.duration - 15))
         .sort((a, b) => new Date(b.lastPlayedAt || 0).getTime() - new Date(a.lastPlayedAt || 0).getTime())
         .slice(0, 12);
 
@@ -859,29 +1017,112 @@ export async function GET(
     const searchParams = req.nextUrl.searchParams;
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '24', 10)));
-    const search = (searchParams.get('search') || '').trim().toLowerCase();
-    const tag = (searchParams.get('tag') || '').trim().toLowerCase();
+    const search = (searchParams.get('search') || '').trim();
+    const tag = (searchParams.get('tag') || '').trim();
     const sort = searchParams.get('sort') || 'recentlyAdded';
     const filter = searchParams.get('filter') || 'all';
 
+    const col = await getMongoVideosCollection();
+    if (col) {
+      try {
+        const query: any = {};
+        if (search) {
+          query.$or = [
+            { title: { $regex: search, $options: 'i' } },
+            { originalFilename: { $regex: search, $options: 'i' } },
+            { tags: { $regex: search, $options: 'i' } },
+            { notes: { $regex: search, $options: 'i' } },
+          ];
+        }
+        if (tag) {
+          query.tags = { $regex: `^${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' };
+        }
+        if (filter === 'favorites') {
+          query.favorite = true;
+        } else if (filter === 'recentlyWatched') {
+          query.lastPlayedAt = { $exists: true, $ne: null };
+        } else if (filter === 'unwatched') {
+          query.lastPosition = { $in: [0, null] };
+          query.playCount = { $in: [0, null] };
+        } else if (filter === 'completed') {
+          query.$expr = {
+            $and: [
+              { $gt: ['$duration', 0] },
+              { $gte: ['$lastPosition', { $subtract: ['$duration', 10] }] },
+            ],
+          };
+        }
+
+        let sortSpec: Record<string, 1 | -1> = { createdAt: -1 };
+        switch (sort) {
+          case 'oldest':
+            sortSpec = { createdAt: 1 };
+            break;
+          case 'nameAsc':
+            sortSpec = { title: 1 };
+            break;
+          case 'nameDesc':
+            sortSpec = { title: -1 };
+            break;
+          case 'recentlyWatched':
+            sortSpec = { lastPlayedAt: -1 };
+            break;
+          case 'mostWatched':
+            sortSpec = { playCount: -1 };
+            break;
+          case 'longest':
+            sortSpec = { duration: -1 };
+            break;
+          case 'shortest':
+            sortSpec = { duration: 1 };
+            break;
+          default:
+            sortSpec = { createdAt: -1 };
+        }
+
+        const total = await col.countDocuments(query);
+        const totalInDb = total > 0 ? total : await col.countDocuments({});
+        if (totalInDb > 0) {
+          const docs = await col
+            .find(query)
+            .sort(sortSpec)
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .toArray();
+          const hydrated = await Promise.all(docs.map(hydrateMongoVideoDoc));
+          return NextResponse.json({
+            success: true,
+            videos: hydrated,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit) || 1,
+          });
+        }
+      } catch (err: any) {
+        console.warn('MongoDB /api/videos warning:', err?.message || err);
+      }
+    }
+
+    const searchLower = search.toLowerCase();
+    const tagLower = tag.toLowerCase();
     let filtered = Array.from(globalVideos.values()).map((v) => {
       repairVideoItem(v);
       return v;
     });
 
-    if (search) {
+    if (searchLower) {
       filtered = filtered.filter(
         (v) =>
-          v.title.toLowerCase().includes(search) ||
-          v.originalFilename.toLowerCase().includes(search) ||
-          v.tags.some((t) => t.toLowerCase().includes(search)) ||
-          (v.notes && v.notes.toLowerCase().includes(search))
+          v.title.toLowerCase().includes(searchLower) ||
+          v.originalFilename.toLowerCase().includes(searchLower) ||
+          v.tags.some((t) => t.toLowerCase().includes(searchLower)) ||
+          (v.notes && v.notes.toLowerCase().includes(searchLower))
       );
     }
 
-    if (tag) {
+    if (tagLower) {
       filtered = filtered.filter((v) =>
-        v.tags.some((t) => t.toLowerCase() === tag)
+        v.tags.some((t) => t.toLowerCase() === tagLower)
       );
     }
 
@@ -936,6 +1177,34 @@ export async function GET(
     const videoId = slug[1];
     const video = globalVideos.get(videoId);
     if (!video) {
+      const mongoUri = process.env.MONGODB_URI;
+      const isRealMongo = mongoUri && !mongoUri.includes('<cluster>') && !mongoUri.includes('<username>');
+      if (isRealMongo && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          if (mongoose.connection.readyState === 0) {
+            mongoose.set('bufferCommands', false);
+            await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
+          }
+          if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+            const doc: any = await mongoose.connection.db
+              .collection('videos')
+              .findOne({ _id: new mongoose.Types.ObjectId(videoId) });
+            if (doc && doc.storageKey) {
+              const streamUrl = await getB2PresignedUrl(doc.storageKey, 3600, doc.storageAccount || 'account2');
+              const thumbnailUrl = doc.thumbnailKey
+                ? await getB2PresignedUrl(
+                    doc.thumbnailKey,
+                    7200,
+                    doc.thumbnailStorageAccount || doc.storageAccount || 'account2'
+                  )
+                : doc.thumbnailUrl;
+              if (streamUrl) {
+                return NextResponse.json({ success: true, streamUrl, thumbnailUrl });
+              }
+            }
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
@@ -964,13 +1233,44 @@ export async function GET(
     const videoId = slug[1];
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const doc: any = await col.findOne({ _id: new mongoose.Types.ObjectId(videoId) });
+          if (doc) {
+            let thumbUrl: string | undefined = doc.thumbnailUrl;
+            if (doc.thumbnailKey) {
+              const b2Thumb = await getB2PresignedUrl(
+                doc.thumbnailKey,
+                7200,
+                doc.thumbnailStorageAccount || doc.storageAccount || 'account2'
+              );
+              if (b2Thumb) {
+                thumbUrl = b2Thumb;
+              } else if (!thumbUrl && readDiskMedia(doc.thumbnailKey)) {
+                thumbUrl = `/api/upload-receiver?key=${encodeURIComponent(doc.thumbnailKey)}`;
+              }
+            }
+            return NextResponse.json({ success: true, thumbnailUrl: thumbUrl || '' });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
       );
     }
 
-    const thumbnailUrl = video.thumbnailUrl || (video.thumbnailKey ? `/api/upload-receiver?key=${encodeURIComponent(video.thumbnailKey)}` : undefined);
+    let thumbnailUrl = video.thumbnailUrl;
+    if (!thumbnailUrl && video.thumbnailKey) {
+      try {
+        const b2Url = await getB2PresignedUrl(video.thumbnailKey, 7200, 'account2');
+        if (b2Url) thumbnailUrl = b2Url;
+      } catch {}
+      if (!thumbnailUrl && readDiskMedia(video.thumbnailKey)) {
+        thumbnailUrl = `/api/upload-receiver?key=${encodeURIComponent(video.thumbnailKey)}`;
+      }
+    }
     return NextResponse.json({
       success: true,
       thumbnailUrl: thumbnailUrl || '',
@@ -982,6 +1282,18 @@ export async function GET(
     const videoId = slug[1];
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const doc: any = await col.findOne({ _id: new mongoose.Types.ObjectId(videoId) });
+          if (doc && doc.storageKey) {
+            const downloadUrl = await getB2PresignedUrl(doc.storageKey, 900, doc.storageAccount || 'account2');
+            if (downloadUrl) {
+              return NextResponse.json({ success: true, downloadUrl });
+            }
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
@@ -1028,8 +1340,20 @@ export async function GET(
 
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10) || 0;
-        const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        const parsedStart = parseInt(parts[0], 10);
+        const start = isNaN(parsedStart) ? 0 : Math.max(0, parsedStart);
+        if (start >= totalSize) {
+          return new NextResponse(null, {
+            status: 416,
+            headers: {
+              'Content-Range': `bytes */${totalSize}`,
+              'Accept-Ranges': 'bytes',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+        const parsedEnd = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        const end = isNaN(parsedEnd) ? totalSize - 1 : Math.min(totalSize - 1, Math.max(start, parsedEnd));
         const chunk = fileBuffer.subarray(start, end + 1);
 
         return new NextResponse(new Uint8Array(chunk), {
@@ -1039,6 +1363,7 @@ export async function GET(
             'Accept-Ranges': 'bytes',
             'Content-Length': chunk.length.toString(),
             'Content-Type': mimeType,
+            'Cache-Control': 'no-transform',
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
             'Access-Control-Allow-Headers': '*',
@@ -1052,6 +1377,7 @@ export async function GET(
           'Content-Type': mimeType,
           'Content-Length': totalSize.toString(),
           'Accept-Ranges': 'bytes',
+          'Cache-Control': 'no-transform',
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
           'Access-Control-Allow-Headers': '*',
@@ -1077,6 +1403,93 @@ export async function GET(
     }
 
     return NextResponse.redirect(resolvedStream);
+  }
+
+  // 8.05 Same-Origin CORS & Range Streaming Proxy: /api/stream-proxy?url=...
+  // Ensures mpegts.js / hls.js / offscreen frame capture and B2 presigned URLs work with Range seeking without CORS failures
+  if (path === 'stream-proxy') {
+    const targetUrlParam = req.nextUrl.searchParams.get('url');
+    if (!targetUrlParam) {
+      return new NextResponse('Missing url parameter', { status: 400 });
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(targetUrlParam);
+    } catch {
+      return new NextResponse('Invalid url parameter', { status: 400 });
+    }
+
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      return new NextResponse('Unsupported protocol', { status: 400 });
+    }
+
+    const host = parsedUrl.hostname.toLowerCase();
+    const isPrivateHost =
+      host === 'localhost' ||
+      host === '::1' ||
+      host.startsWith('127.') ||
+      host.startsWith('10.') ||
+      host.startsWith('192.168.') ||
+      host.startsWith('169.254.') ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+
+    if (isPrivateHost) {
+      return new NextResponse('Forbidden host', { status: 403 });
+    }
+
+    const rangeHeader = req.headers.get('range');
+    const upstreamHeaders: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    };
+    if (rangeHeader) {
+      upstreamHeaders['Range'] = rangeHeader;
+    }
+
+    try {
+      const upstreamResp = await fetch(parsedUrl.toString(), {
+        headers: upstreamHeaders,
+        redirect: 'follow',
+        signal: req.signal,
+      });
+
+      const respHeaders = new Headers();
+      respHeaders.set('Accept-Ranges', 'bytes');
+      respHeaders.set('Cache-Control', 'no-transform');
+      respHeaders.set('Access-Control-Allow-Origin', '*');
+      respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      respHeaders.set('Access-Control-Allow-Headers', '*');
+
+      let contentType = (upstreamResp.headers.get('content-type') || '').toLowerCase();
+      if (!contentType || contentType.includes('octet-stream')) {
+        const lowerPath = parsedUrl.pathname.toLowerCase();
+        if (lowerPath.endsWith('.webm')) contentType = 'video/webm';
+        else if (lowerPath.endsWith('.mov')) contentType = 'video/quicktime';
+        else if (lowerPath.endsWith('.mkv')) contentType = 'video/x-matroska';
+        else if (lowerPath.endsWith('.m3u8')) contentType = 'application/vnd.apple.mpegurl';
+        else if (/\.(m2?ts|mts)$/.test(lowerPath)) contentType = 'video/mp2t';
+        else if (lowerPath.endsWith('.flv')) contentType = 'video/x-flv';
+        else contentType = 'video/mp4';
+      }
+      respHeaders.set('Content-Type', contentType);
+
+      const contentRange = upstreamResp.headers.get('content-range');
+      if (contentRange) respHeaders.set('Content-Range', contentRange);
+
+      const contentLength = upstreamResp.headers.get('content-length');
+      if (contentLength) respHeaders.set('Content-Length', contentLength);
+
+      const status = upstreamResp.status === 200 && rangeHeader && contentRange ? 206 : upstreamResp.status;
+      return new NextResponse(upstreamResp.body, {
+        status,
+        headers: respHeaders,
+      });
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || req.signal.aborted) {
+        return new NextResponse(null, { status: 499 });
+      }
+      return new NextResponse('Upstream stream unavailable', { status: 502 });
+    }
   }
 
   // 8.1 Upload receiver GET handler for uploaded thumbnails and videos: /api/upload-receiver?key=...
@@ -1109,8 +1522,20 @@ export async function GET(
 
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10) || 0;
-        const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        const parsedStart = parseInt(parts[0], 10);
+        const start = isNaN(parsedStart) ? 0 : Math.max(0, parsedStart);
+        if (start >= totalSize) {
+          return new NextResponse(null, {
+            status: 416,
+            headers: {
+              'Content-Range': `bytes */${totalSize}`,
+              'Accept-Ranges': 'bytes',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+        const parsedEnd = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        const end = isNaN(parsedEnd) ? totalSize - 1 : Math.min(totalSize - 1, Math.max(start, parsedEnd));
         const chunk = fileBuffer.subarray(start, end + 1);
 
         return new NextResponse(new Uint8Array(chunk), {
@@ -1120,6 +1545,7 @@ export async function GET(
             'Accept-Ranges': 'bytes',
             'Content-Length': chunk.length.toString(),
             'Content-Type': mimeType,
+            'Cache-Control': 'no-transform',
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
             'Access-Control-Allow-Headers': '*',
@@ -1133,6 +1559,7 @@ export async function GET(
           'Content-Type': mimeType,
           'Content-Length': totalSize.toString(),
           'Accept-Ranges': 'bytes',
+          'Cache-Control': 'no-transform',
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
           'Access-Control-Allow-Headers': '*',
@@ -1151,6 +1578,16 @@ export async function GET(
     const videoId = slug[1];
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const doc: any = await col.findOne({ _id: new mongoose.Types.ObjectId(videoId) });
+          if (doc) {
+            const hydrated = await hydrateMongoVideoDoc(doc);
+            return NextResponse.json({ success: true, video: hydrated });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
@@ -1243,9 +1680,11 @@ export async function GET(
 
     // Sort
     resolvedList.sort((a, b) => {
-      if (sort === 'title') return a.title.localeCompare(b.title);
+      if (sort === 'title' || sort === 'nameAsc') return a.title.localeCompare(b.title);
+      if (sort === 'nameDesc') return b.title.localeCompare(a.title);
       if (sort === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       if (sort === 'duration') return (b.duration || 0) - (a.duration || 0);
+      if (sort === 'size') return (b.size || 0) - (a.size || 0);
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
@@ -1321,21 +1760,47 @@ export async function GET(
       let upstreamResp = await fetch(targetStreamUrl, {
         headers: forwardHeaders,
         redirect: 'follow',
+        signal: req.signal,
       });
 
-      // Fallback if upstream returns error or HTML (e.g. Google Drive access denial or broken file)
+      // Secondary attempt: Google Drive API key endpoint before sample fallback
+      const firstType = upstreamResp.headers.get('content-type') || '';
+      if (
+        upstreamResp.status !== 416 &&
+        (!upstreamResp.ok || firstType.includes('text/html') || upstreamResp.status >= 400) &&
+        isRealDriveFile &&
+        process.env.GOOGLE_DRIVE_API_KEY
+      ) {
+        const apiKeyUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${encodeURIComponent(
+          process.env.GOOGLE_DRIVE_API_KEY
+        )}`;
+        if (apiKeyUrl !== targetStreamUrl) {
+          upstreamResp = await fetch(apiKeyUrl, {
+            headers: forwardHeaders,
+            redirect: 'follow',
+            signal: req.signal,
+          });
+        }
+      }
+
+      // Fallback if upstream returns error or HTML (never swap sample on 416 EOF range probes)
       const upstreamType = upstreamResp.headers.get('content-type') || '';
-      if (!upstreamResp.ok || upstreamType.includes('text/html') || upstreamResp.status >= 400) {
+      if (
+        upstreamResp.status !== 416 &&
+        (!upstreamResp.ok || upstreamType.includes('text/html') || upstreamResp.status >= 400)
+      ) {
         if (targetStreamUrl !== reliableSample) {
           upstreamResp = await fetch(reliableSample, {
             headers: forwardHeaders,
             redirect: 'follow',
+            signal: req.signal,
           });
         }
       }
 
       const respHeaders = new Headers();
       respHeaders.set('Accept-Ranges', 'bytes');
+      respHeaders.set('Cache-Control', 'no-transform');
       respHeaders.set('Access-Control-Allow-Origin', '*');
       respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       respHeaders.set('Access-Control-Allow-Headers', '*');
@@ -1365,10 +1830,13 @@ export async function GET(
       }
 
       return new NextResponse(upstreamResp.body, {
-        status: upstreamResp.status === 200 && rangeHeader ? 206 : upstreamResp.status,
+        status: upstreamResp.status === 200 && rangeHeader && contentRange ? 206 : upstreamResp.status,
         headers: respHeaders,
       });
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.name === 'AbortError' || req.signal.aborted) {
+        return new NextResponse(null, { status: 499 });
+      }
       return NextResponse.redirect(reliableSample);
     }
   }
@@ -1663,6 +2131,25 @@ export async function POST(
     const videoId = slug[1];
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const updateOps: any = globalSettings.saveWatchHistory
+            ? { $inc: { playCount: 1 }, $set: { lastPlayedAt: new Date() } }
+            : {};
+          const doc = await col.findOneAndUpdate(
+            { _id: new mongoose.Types.ObjectId(videoId) },
+            Object.keys(updateOps).length > 0 ? updateOps : { $set: { updatedAt: new Date() } },
+            { returnDocument: 'after' }
+          );
+          if (doc) {
+            return NextResponse.json({
+              success: true,
+              playCount: (doc as any).playCount || 0,
+            });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
@@ -1672,6 +2159,7 @@ export async function POST(
     if (globalSettings.saveWatchHistory) {
       video.playCount += 1;
       video.lastPlayedAt = new Date().toISOString();
+      saveVideosToDisk();
     }
 
     return NextResponse.json({
@@ -1685,6 +2173,20 @@ export async function POST(
     const videoId = slug[1];
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const doc: any = await col.findOne({ _id: new mongoose.Types.ObjectId(videoId) });
+          if (doc) {
+            const nextFav = !Boolean(doc.favorite);
+            await col.updateOne(
+              { _id: new mongoose.Types.ObjectId(videoId) },
+              { $set: { favorite: nextFav, updatedAt: new Date() } }
+            );
+            return NextResponse.json({ success: true, favorite: nextFav });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
@@ -1692,6 +2194,8 @@ export async function POST(
     }
 
     video.favorite = !video.favorite;
+    video.updatedAt = new Date().toISOString();
+    saveVideosToDisk();
     return NextResponse.json({
       success: true,
       favorite: video.favorite,
@@ -1701,24 +2205,51 @@ export async function POST(
   // 7. Attach Thumbnail: /api/videos/:id/thumbnail
   if (slug.length === 3 && slug[0] === 'videos' && slug[2] === 'thumbnail') {
     const videoId = slug[1];
+    const body = await req.json();
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const updateFields: any = {
+            thumbnailKey: body.thumbnailKey,
+            thumbnailStorageAccount: body.thumbnailStorageAccount || 'account2',
+            updatedAt: new Date(),
+          };
+          if (body.blurhash) updateFields.blurhash = body.blurhash;
+          const updated = await col.findOneAndUpdate(
+            { _id: new mongoose.Types.ObjectId(videoId) },
+            { $set: updateFields },
+            { returnDocument: 'after' }
+          );
+          if (updated) {
+            const hydrated = await hydrateMongoVideoDoc(updated);
+            return NextResponse.json({
+              success: true,
+              video: hydrated,
+              thumbnailUrl: hydrated.thumbnailUrl,
+            });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
       );
     }
 
-    const body = await req.json();
     video.thumbnailKey = body.thumbnailKey;
     if (body.blurhash) {
       video.blurhash = body.blurhash;
     }
     video.thumbnailUrl = `/api/upload-receiver?key=${encodeURIComponent(body.thumbnailKey)}`;
+    video.updatedAt = new Date().toISOString();
+    saveVideosToDisk();
 
     return NextResponse.json({
       success: true,
       video,
+      thumbnailUrl: video.thumbnailUrl,
     });
   }
 
@@ -1729,6 +2260,13 @@ export async function POST(
       v.lastPlayedAt = undefined;
       v.playCount = 0;
     });
+    saveVideosToDisk();
+    const col = await getMongoVideosCollection();
+    if (col) {
+      try {
+        await col.updateMany({}, { $set: { lastPosition: 0, playCount: 0 }, $unset: { lastPlayedAt: '' } });
+      } catch {}
+    }
     return NextResponse.json({
       success: true,
       message: 'Watch history cleared successfully.',
@@ -2016,15 +2554,35 @@ export async function PATCH(
   // 2. Update Playback Progress: /api/videos/:id/progress
   if (slug.length === 3 && slug[0] === 'videos' && slug[2] === 'progress') {
     const videoId = slug[1];
+    const body = await req.json();
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const updateFields: any = { updatedAt: new Date() };
+          if (typeof body.position === 'number') updateFields.lastPosition = body.position;
+          if (typeof body.duration === 'number' && body.duration > 0) updateFields.duration = body.duration;
+          if (globalSettings.saveWatchHistory) updateFields.lastPlayedAt = new Date();
+          const updated = await col.findOneAndUpdate(
+            { _id: new mongoose.Types.ObjectId(videoId) },
+            { $set: updateFields },
+            { returnDocument: 'after' }
+          );
+          if (updated) {
+            return NextResponse.json({
+              success: true,
+              lastPosition: (updated as any).lastPosition || 0,
+            });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
       );
     }
 
-    const body = await req.json();
     if (typeof body.position === 'number') {
       video.lastPosition = body.position;
     }
@@ -2034,6 +2592,7 @@ export async function PATCH(
     if (globalSettings.saveWatchHistory) {
       video.lastPlayedAt = new Date().toISOString();
     }
+    saveVideosToDisk();
 
     return NextResponse.json({
       success: true,
@@ -2044,15 +2603,34 @@ export async function PATCH(
   // 3. Update Video Metadata: /api/videos/:id
   if (slug.length === 2 && slug[0] === 'videos') {
     const videoId = slug[1];
+    const body = await req.json();
     const video = globalVideos.get(videoId);
     if (!video) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const updateFields: any = { updatedAt: new Date() };
+          if (body.title !== undefined) updateFields.title = body.title;
+          if (body.tags !== undefined) updateFields.tags = body.tags;
+          if (body.notes !== undefined) updateFields.notes = body.notes;
+          if (body.favorite !== undefined) updateFields.favorite = body.favorite;
+          const updated = await col.findOneAndUpdate(
+            { _id: new mongoose.Types.ObjectId(videoId) },
+            { $set: updateFields },
+            { returnDocument: 'after' }
+          );
+          if (updated) {
+            const hydrated = await hydrateMongoVideoDoc(updated);
+            return NextResponse.json({ success: true, video: hydrated });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
       );
     }
 
-    const body = await req.json();
     if (body.title !== undefined) video.title = body.title;
     if (body.tags !== undefined) video.tags = body.tags;
     if (body.notes !== undefined) video.notes = body.notes;
@@ -2113,6 +2691,18 @@ export async function DELETE(
   if (slug.length === 2 && slug[0] === 'videos') {
     const videoId = slug[1];
     if (!globalVideos.has(videoId)) {
+      const col = await getMongoVideosCollection();
+      if (col && mongoose.Types.ObjectId.isValid(videoId)) {
+        try {
+          const del = await col.deleteOne({ _id: new mongoose.Types.ObjectId(videoId) });
+          if (del.deletedCount > 0) {
+            return NextResponse.json({
+              success: true,
+              message: 'Video and storage objects permanently deleted.',
+            });
+          }
+        } catch {}
+      }
       return NextResponse.json(
         { success: false, error: { message: 'Video not found' } },
         { status: 404 }
@@ -2293,11 +2883,96 @@ export async function HEAD(
       status: 200,
       headers: {
         'Access-Control-Allow-Origin': '*',
+        'Accept-Ranges': 'bytes',
         'Content-Length': '0',
         'Range': `bytes=0-${Math.max(0, uploadedBytes - 1)}`,
         'X-Uploaded-Bytes': uploadedBytes.toString(),
         'X-Total-Bytes': totalSize.toString(),
       },
+    });
+  }
+
+  if (path === 'stream-proxy') {
+    const targetUrlParam = req.nextUrl.searchParams.get('url');
+    if (!targetUrlParam) {
+      return new NextResponse(null, { status: 400 });
+    }
+    try {
+      const parsed = new URL(targetUrlParam);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        return new NextResponse(null, { status: 400 });
+      }
+      const host = parsed.hostname.toLowerCase();
+      const isPrivateHost =
+        host === 'localhost' ||
+        host === '::1' ||
+        host.startsWith('127.') ||
+        host.startsWith('10.') ||
+        host.startsWith('192.168.') ||
+        host.startsWith('169.254.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+      if (isPrivateHost) {
+        return new NextResponse(null, { status: 403 });
+      }
+      const upstream = await fetch(parsed.toString(), { method: 'HEAD', redirect: 'follow', signal: req.signal });
+      const headers = new Headers();
+      headers.set('Accept-Ranges', 'bytes');
+      headers.set('Access-Control-Allow-Origin', '*');
+      const cl = upstream.headers.get('content-length');
+      let ct = (upstream.headers.get('content-type') || '').toLowerCase();
+      if (!ct || ct.includes('octet-stream')) {
+        const lowerPath = parsed.pathname.toLowerCase();
+        if (lowerPath.endsWith('.webm')) ct = 'video/webm';
+        else if (lowerPath.endsWith('.mov')) ct = 'video/quicktime';
+        else if (lowerPath.endsWith('.mkv')) ct = 'video/x-matroska';
+        else if (lowerPath.endsWith('.m3u8')) ct = 'application/vnd.apple.mpegurl';
+        else if (/\.(m2?ts|mts)$/.test(lowerPath)) ct = 'video/mp2t';
+        else if (lowerPath.endsWith('.flv')) ct = 'video/x-flv';
+        else ct = 'video/mp4';
+      }
+      if (cl) headers.set('Content-Length', cl);
+      if (ct) headers.set('Content-Type', ct);
+      return new NextResponse(null, { status: upstream.ok ? 200 : upstream.status, headers });
+    } catch {
+      return new NextResponse(null, { status: 502 });
+    }
+  }
+
+  if (slug.length === 3 && slug[0] === 'videos' && slug[2] === 'raw') {
+    const video = globalVideos.get(slug[1]);
+    if (!video) {
+      return new NextResponse(null, { status: 404 });
+    }
+    const uploaded = uploadedBlobs.get(video.storageKey);
+    const diskData = uploaded?.buffer?.length ? null : readDiskMedia(video.storageKey);
+    const totalSize = uploaded?.buffer?.length || diskData?.size || video.size || 0;
+    return new NextResponse(null, {
+      status: 200,
+      headers: {
+        'Accept-Ranges': 'bytes',
+        'Content-Type': video.mimeType || 'video/mp4',
+        'Content-Length': totalSize.toString(),
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
+  if (slug.length === 4 && slug[0] === 'drive' && slug[1] === 'videos' && (slug[3] === 'chunk-stream' || slug[3] === 'raw')) {
+    const driveId = slug[2];
+    const driveVideo =
+      globalDriveVideos.get(driveId) ||
+      Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === driveId);
+    const headers: Record<string, string> = {
+      'Accept-Ranges': 'bytes',
+      'Content-Type': driveVideo?.mimeType || 'video/mp4',
+      'Access-Control-Allow-Origin': '*',
+    };
+    if (driveVideo?.size && driveVideo.size > 0 && driveVideo.size !== 1024 * 1024 * 50) {
+      headers['Content-Length'] = driveVideo.size.toString();
+    }
+    return new NextResponse(null, {
+      status: 200,
+      headers,
     });
   }
 

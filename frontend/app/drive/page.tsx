@@ -202,9 +202,16 @@ export default function DriveGalleryPage() {
         <LibrarySidebar
           activeSection="drive"
           onSelectSection={(sec) => {
-            if (sec !== 'drive') {
-              router.push('/');
+            if (sec === 'drive') return;
+            if (sec === 'settings') {
+              router.push('/settings');
+              return;
             }
+            if (sec === 'home' || sec === 'vault') {
+              router.push('/');
+              return;
+            }
+            router.push(`/?section=${encodeURIComponent(sec)}`);
           }}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
@@ -337,11 +344,23 @@ export default function DriveGalleryPage() {
                   video={video}
                   viewMode="list"
                   onEdit={(v) => setEditingVideo(v)}
-                  onFavoriteToggle={(id, isFav) => {
+                  onFavoriteToggle={async (id, isFav) => {
+                    const prevFav = video.favorite;
                     setVideos((prev) =>
                       prev.map((v) => (v._id === id ? { ...v, favorite: isFav } : v))
                     );
                     updateSingleDriveVideoInCache({ ...video, favorite: isFav });
+                    try {
+                      const res = await api.updateDriveVideoMetadata(id, { favorite: isFav });
+                      if (res?.video) {
+                        updateSingleDriveVideoInCache(res.video);
+                      }
+                    } catch {
+                      setVideos((prev) =>
+                        prev.map((v) => (v._id === id ? { ...v, favorite: prevFav } : v))
+                      );
+                      updateSingleDriveVideoInCache({ ...video, favorite: prevFav });
+                    }
                   }}
                 />
               ))}
@@ -354,11 +373,23 @@ export default function DriveGalleryPage() {
                   video={video}
                   viewMode="grid"
                   onEdit={(v) => setEditingVideo(v)}
-                  onFavoriteToggle={(id, isFav) => {
+                  onFavoriteToggle={async (id, isFav) => {
+                    const prevFav = video.favorite;
                     setVideos((prev) =>
                       prev.map((v) => (v._id === id ? { ...v, favorite: isFav } : v))
                     );
                     updateSingleDriveVideoInCache({ ...video, favorite: isFav });
+                    try {
+                      const res = await api.updateDriveVideoMetadata(id, { favorite: isFav });
+                      if (res?.video) {
+                        updateSingleDriveVideoInCache(res.video);
+                      }
+                    } catch {
+                      setVideos((prev) =>
+                        prev.map((v) => (v._id === id ? { ...v, favorite: prevFav } : v))
+                      );
+                      updateSingleDriveVideoInCache({ ...video, favorite: prevFav });
+                    }
                   }}
                 />
               ))}

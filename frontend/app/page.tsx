@@ -21,29 +21,37 @@ import {
   getStoredPlaylists,
   createCollection,
   deleteCollection,
+  createPlaylist,
+  deletePlaylist,
 } from '../lib/collectionsManager';
 import { ICollection, IPlaylist } from '../types';
 
 export default function LibraryHomePage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, settings } = useAuth();
   const { openUploadModal } = useUpload();
 
   const [activeNavSection, setActiveNavSection] = useState<LibraryNavSection>('home');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
-  const [collections, setCollections] = useState<ICollection[]>(() => getStoredCollections());
-  const [playlists, setPlaylists] = useState<IPlaylist[]>(() => getStoredPlaylists());
+  const [collections, setCollections] = useState<ICollection[]>([]);
+  const [playlists, setPlaylists] = useState<IPlaylist[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<ICollection | null>(null);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<IPlaylist | null>(null);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [showCreatePlaylistModal, setShowCreatePlaylistModal] = useState(false);
+  const [batchPendingDeleteIds, setBatchPendingDeleteIds] = useState<string[] | null>(null);
+  const [batchStatusMsg, setBatchStatusMsg] = useState<string>('');
 
   useEffect(() => {
     const handleUpdate = () => {
       setCollections(getStoredCollections());
       setPlaylists(getStoredPlaylists());
     };
+    handleUpdate();
     window.addEventListener('vault:collections-updated', handleUpdate);
     window.addEventListener('vault:playlists-updated', handleUpdate);
     return () => {
@@ -99,6 +107,37 @@ export default function LibraryHomePage() {
   const [editingVideo, setEditingVideo] = useState<IVideo | null>(null);
   const [deletingVideo, setDeletingVideo] = useState<IVideo | null>(null);
   const hasRestoredScroll = useRef<boolean>(false);
+
+  const handleSelectNavSection = useCallback((section: LibraryNavSection) => {
+    setActiveNavSection(section);
+    setSelectedCollection(null);
+    setSelectedPlaylist(null);
+    setIsMobileDrawerOpen(false);
+
+    if (section === 'home' || section === 'vault' || section === 'recent') {
+      setFilter('all');
+      setSort('recentlyAdded');
+      setPage(1);
+    } else if (section === 'continue' || section === 'watched') {
+      setFilter('recentlyWatched');
+      setSort('recentlyWatched');
+      setPage(1);
+    } else if (section === 'favorites') {
+      setFilter('favorites');
+      setSort('recentlyAdded');
+      setPage(1);
+    }
+  }, []);
+
+  // Honor ?section= query param when navigating from /drive or /settings
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const sec = params.get('section') as LibraryNavSection | null;
+    if (sec && ['home', 'continue', 'recent', 'watched', 'favorites', 'collections', 'playlists', 'vault'].includes(sec)) {
+      handleSelectNavSection(sec);
+    }
+  }, [handleSelectNavSection]);
 
   useEffect(() => {
     saveLibraryState({
@@ -194,10 +233,10 @@ export default function LibraryHomePage() {
     }
   }, [gridVideos]);
 
-  const handleRefreshAll = () => {
+  const handleRefreshAll = useCallback(() => {
     fetchHomeData();
     fetchGridData();
-  };
+  }, [fetchHomeData, fetchGridData]);
 
   useEffect(() => {
     const handleUploadedEvent = () => {
@@ -209,28 +248,37 @@ export default function LibraryHomePage() {
     };
   }, [handleRefreshAll]);
 
-  const handleSelectNavSection = (section: LibraryNavSection) => {
-    setActiveNavSection(section);
-    setIsMobileDrawerOpen(false);
+  const handleBatchFavorite = useCallback(
+    async (ids: string[]) => {
+      if (!ids || ids.length === 0) return;
+      try {
+        await Promise.all(
+          ids.map((id) => api.updateVideoMetadata(id, { favorite: true }))
+        );
+        setBatchStatusMsg(`Added ${ids.length} video${ids.length === 1 ? '' : 's'} to favorites.`);
+        setTimeout(() => setBatchStatusMsg(''), 3000);
+        handleRefreshAll();
+      } catch (err) {
+        console.error('Batch favorite failed:', err);
+      }
+    },
+    [handleRefreshAll]
+  );
 
-    if (section === 'home') {
-      setFilter('all');
-      setSort('recentlyAdded');
-      setPage(1);
-    } else if (section === 'continue') {
-      setFilter('recentlyWatched');
-      setSort('recentlyWatched');
-      setPage(1);
-    } else if (section === 'watched') {
-      setFilter('recentlyWatched');
-      setSort('recentlyWatched');
-      setPage(1);
-    } else if (section === 'favorites') {
-      setFilter('favorites');
-      setSort('recentlyAdded');
-      setPage(1);
+  const handleConfirmBatchDelete = useCallback(async () => {
+    if (!batchPendingDeleteIds || batchPendingDeleteIds.length === 0) return;
+    const count = batchPendingDeleteIds.length;
+    try {
+      await Promise.all(batchPendingDeleteIds.map((id) => api.deleteVideo(id)));
+      setBatchPendingDeleteIds(null);
+      setBatchStatusMsg(`Deleted ${count} video${count === 1 ? '' : 's'}.`);
+      setTimeout(() => setBatchStatusMsg(''), 3000);
+      handleRefreshAll();
+    } catch (err) {
+      console.error('Batch delete failed:', err);
+      setBatchPendingDeleteIds(null);
     }
-  };
+  }, [batchPendingDeleteIds, handleRefreshAll]);
 
   if (isLoading || !isAuthenticated) {
     return (
@@ -251,6 +299,18 @@ export default function LibraryHomePage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const displayedVideos = selectedCollection
+    ? gridVideos.filter((v) => selectedCollection.videoIds.includes(v._id))
+    : selectedPlaylist
+    ? gridVideos.filter((v) => selectedPlaylist.videoIds.includes(v._id))
+    : gridVideos;
+
+  const displayedTotal = selectedCollection
+    ? displayedVideos.length
+    : selectedPlaylist
+    ? displayedVideos.length
+    : totalGrid;
+
   return (
     <div className="min-h-screen flex flex-col bg-[#090A0F] text-[#F4F5F8]">
       <Navbar
@@ -267,10 +327,7 @@ export default function LibraryHomePage() {
         {/* Sidebar Navigation */}
         <LibrarySidebar
           activeSection={activeNavSection}
-          onSelectSection={(sec) => {
-            setSelectedCollection(null);
-            handleSelectNavSection(sec);
-          }}
+          onSelectSection={handleSelectNavSection}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
           isMobileDrawerOpen={isMobileDrawerOpen}
@@ -288,6 +345,35 @@ export default function LibraryHomePage() {
 
         {/* Main Content Area */}
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
+          {/* Batch Status / Confirmation Banner */}
+          {batchPendingDeleteIds && batchPendingDeleteIds.length > 0 && (
+            <div className="p-3.5 bg-rose-950/40 border border-rose-500/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs animate-fade-in">
+              <span className="text-rose-200 font-medium">
+                Permanently delete <strong>{batchPendingDeleteIds.length}</strong> selected video{batchPendingDeleteIds.length === 1 ? '' : 's'}? This cannot be undone.
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={handleConfirmBatchDelete}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Confirm Delete
+                </button>
+                <button
+                  onClick={() => setBatchPendingDeleteIds(null)}
+                  className="px-3 py-1.5 bg-[#191D29] hover:bg-white/[0.08] text-slate-300 font-medium rounded-lg border border-white/[0.08] transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {batchStatusMsg && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-medium animate-fade-in">
+              {batchStatusMsg}
+            </div>
+          )}
+
           {/* Dedicated Collections Management View */}
           {activeNavSection === 'collections' && (
             <div className="space-y-6">
@@ -345,6 +431,7 @@ export default function LibraryHomePage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteCollection(col.id);
+                          if (selectedCollection?.id === col.id) setSelectedCollection(null);
                           setCollections(getStoredCollections());
                         }}
                         className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-rose-950/30 transition-colors"
@@ -372,8 +459,85 @@ export default function LibraryHomePage() {
             </div>
           )}
 
+          {/* Dedicated Playlists Management View */}
+          {activeNavSection === 'playlists' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                    <ListMusic className="w-5 h-5 text-cyan-400" />
+                    <span>My Playlists</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Build ordered playback queues across your vault and Drive videos.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowCreatePlaylistModal(true)}
+                  className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Playlist</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {playlists.map((pl) => (
+                  <div
+                    key={pl.id}
+                    onClick={() => setSelectedPlaylist(pl)}
+                    className={`bg-[#131620] border rounded-xl p-4 cursor-pointer transition-all group flex items-center justify-between gap-3 ${
+                      selectedPlaylist?.id === pl.id
+                        ? 'border-cyan-400/60 ring-2 ring-cyan-400/20'
+                        : 'border-white/[0.08] hover:border-white/[0.16]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+                        <ListMusic className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-bold text-white truncate">{pl.name}</h4>
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          {pl.videoIds.length} {pl.videoIds.length === 1 ? 'item' : 'items'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deletePlaylist(pl.id);
+                        if (selectedPlaylist?.id === pl.id) setSelectedPlaylist(null);
+                        setPlaylists(getStoredPlaylists());
+                      }}
+                      className="p-1.5 text-slate-500 hover:text-rose-400 rounded hover:bg-rose-950/30 transition-colors shrink-0"
+                      title="Delete Playlist"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {selectedPlaylist && (
+                <div className="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-xl flex items-center justify-between text-xs text-cyan-300">
+                  <span>Viewing playlist: <strong>{selectedPlaylist.name}</strong> ({selectedPlaylist.videoIds.length} videos)</span>
+                  <button
+                    onClick={() => setSelectedPlaylist(null)}
+                    className="text-xs underline hover:text-white"
+                  >
+                    Show All
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Continue Watching Carousel Section (If any exist) */}
-          {activeNavSection === 'home' && homeSections.continueWatching && homeSections.continueWatching.length > 0 && !searchQuery && (
+          {(activeNavSection === 'home' || activeNavSection === 'continue') &&
+            homeSections.continueWatching &&
+            homeSections.continueWatching.length > 0 &&
+            !searchQuery && (
             <section className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm sm:text-base font-semibold text-white tracking-tight flex items-center gap-2">
@@ -383,11 +547,16 @@ export default function LibraryHomePage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {homeSections.continueWatching.slice(0, 4).map((vid) => {
+                {homeSections.continueWatching.slice(0, activeNavSection === 'continue' ? 12 : 4).map((vid) => {
                   const progressPct =
                     vid.duration && vid.duration > 0 && vid.lastPosition
                       ? Math.min(100, Math.round((vid.lastPosition / vid.duration) * 100))
                       : 0;
+                  const matchedVid =
+                    gridVideos.find((g) => g._id === vid._id) ||
+                    homeSections.recentlyWatched?.find((g) => g._id === vid._id) ||
+                    homeSections.mostWatched?.find((g) => g._id === vid._id) ||
+                    homeSections.recentlyAdded?.find((g) => g._id === vid._id);
 
                   return (
                     <div
@@ -396,13 +565,17 @@ export default function LibraryHomePage() {
                     >
                       <Link
                         href={`/watch/${vid._id}`}
-                        className="relative w-28 sm:w-32 aspect-video bg-[#090A0F] rounded-lg overflow-hidden shrink-0 flex items-center justify-center cursor-pointer group-hover:scale-102 transition-transform"
+                        className="relative w-28 sm:w-32 aspect-video bg-[#090A0F] rounded-lg overflow-hidden shrink-0 flex items-center justify-center cursor-pointer group-hover:scale-[1.02] transition-transform"
                       >
                         <ThumbnailLoader
                           videoId={vid._id}
-                          src={vid.thumbnailUrl}
-                          fallbackText={vid.title}
+                          src={vid.thumbnailUrl || matchedVid?.thumbnailUrl}
+                          blurhash={vid.blurhash || matchedVid?.blurhash}
+                          fallbackText={vid.originalFilename || vid.title}
                           alt={vid.title}
+                          blocked={!!settings?.blockPlaceholders}
+                          autoGenerate
+                          loading="eager"
                           className="w-full h-full object-cover"
                         />
                         <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -437,14 +610,10 @@ export default function LibraryHomePage() {
 
           {/* Video Grid */}
           <VideoGrid
-            videos={
-              selectedCollection
-                ? gridVideos.filter((v) => selectedCollection.videoIds.includes(v._id))
-                : gridVideos
-            }
-            total={selectedCollection ? selectedCollection.videoIds.length : totalGrid}
+            videos={displayedVideos}
+            total={displayedTotal}
             page={page}
-            totalPages={totalPages}
+            totalPages={selectedCollection || selectedPlaylist ? 1 : totalPages}
             onPageChange={(p) => setPage(p)}
             sort={sort}
             onSortChange={(s) => {
@@ -458,12 +627,18 @@ export default function LibraryHomePage() {
             }}
             onEditVideo={(v) => setEditingVideo(v)}
             onDeleteVideo={(v) => setDeletingVideo(v)}
+            onBatchDelete={(ids) => setBatchPendingDeleteIds(ids)}
+            onBatchFavorite={handleBatchFavorite}
             onOpenUpload={openUploadModal}
             title={
               selectedCollection
                 ? `Collection: ${selectedCollection.name}`
+                : selectedPlaylist
+                ? `Playlist: ${selectedPlaylist.name}`
                 : searchQuery
                 ? `Search: "${searchQuery}"`
+                : activeNavSection === 'recent'
+                ? 'Recently Added'
                 : filter === 'recentlyWatched'
                 ? 'Recently Viewed'
                 : filter === 'favorites'
@@ -508,6 +683,49 @@ export default function LibraryHomePage() {
                     setCollections(getStoredCollections());
                     setNewCollectionName('');
                     setShowCreateModal(false);
+                  }
+                }}
+                className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg cursor-pointer shadow"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Playlist Modal */}
+      {showCreatePlaylistModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#131620] border border-white/[0.08] rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <ListMusic className="w-4 h-4 text-cyan-400" />
+              <span>Create New Playlist</span>
+            </h3>
+            <input
+              type="text"
+              placeholder="Playlist name (e.g. Weekend Queue)"
+              value={newPlaylistName}
+              onChange={(e) => setNewPlaylistName(e.target.value)}
+              className="w-full px-3 py-2 bg-[#090A0F] border border-white/[0.08] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/60"
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setShowCreatePlaylistModal(false);
+                  setNewPlaylistName('');
+                }}
+                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-slate-300 text-xs font-semibold rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newPlaylistName.trim()) {
+                    createPlaylist(newPlaylistName.trim());
+                    setPlaylists(getStoredPlaylists());
+                    setNewPlaylistName('');
+                    setShowCreatePlaylistModal(false);
                   }
                 }}
                 className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold rounded-lg cursor-pointer shadow"

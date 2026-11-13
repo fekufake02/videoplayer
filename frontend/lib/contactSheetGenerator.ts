@@ -58,6 +58,26 @@ export function setCachedContactSheet(videoId: string, dataUrl: string): void {
   }
 }
 
+function toSafePreviewVideoUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
+  if (rawUrl.startsWith('/') || rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')) {
+    return rawUrl;
+  }
+  if (
+    rawUrl.includes('zencdn.net') ||
+    rawUrl.includes('interactive-examples.mdn.mozilla.net') ||
+    rawUrl.includes('githubusercontent.com')
+  ) {
+    return rawUrl;
+  }
+  return `/api/stream-proxy?url=${encodeURIComponent(rawUrl)}`;
+}
+
+function isNonNativeContainerUrl(rawUrl: string): boolean {
+  const lower = rawUrl.toLowerCase();
+  return /\.(m3u8|m2?ts|flv)(\?|$)/.test(lower);
+}
+
 /**
  * Generates a contact sheet grid canvas only when real video frames can be extracted.
  * Samples frames across video duration. Never draws fake dummy circles.
@@ -73,7 +93,7 @@ export async function generateContactSheet(
     if (existing) return existing;
   }
 
-  if (!duration || duration <= 0) return null;
+  if (!duration || !isFinite(duration) || duration <= 0) return null;
 
   const totalWidth = config.cols * config.tileWidth;
   const totalHeight = config.rows * config.tileHeight;
@@ -98,7 +118,9 @@ export async function generateContactSheet(
     videoUrl = videoSource;
   }
 
-  if (!videoUrl) return null;
+  if (!videoUrl || isNonNativeContainerUrl(videoUrl)) return null;
+
+  const safeVideoUrl = toSafePreviewVideoUrl(videoUrl);
 
   // Sample timestamps evenly across duration
   const sampleTimestamps: number[] = [];
@@ -107,13 +129,15 @@ export async function generateContactSheet(
     sampleTimestamps.push(Math.max(0.5, Math.min(duration - 0.5, (i + 0.5) * step)));
   }
 
+  let offscreenVideo: HTMLVideoElement | null = null;
   try {
-    const offscreenVideo = document.createElement('video');
-    offscreenVideo.crossOrigin = 'anonymous';
-    offscreenVideo.muted = true;
-    offscreenVideo.playsInline = true;
-    offscreenVideo.preload = 'metadata';
-    offscreenVideo.src = videoUrl;
+    offscreenVideo = document.createElement('video');
+    const vidEl = offscreenVideo;
+    vidEl.crossOrigin = 'anonymous';
+    vidEl.muted = true;
+    vidEl.playsInline = true;
+    vidEl.preload = 'metadata';
+    vidEl.src = safeVideoUrl;
 
     let successfulFrames = 0;
 
@@ -127,22 +151,22 @@ export async function generateContactSheet(
           resolve(true);
           return;
         }
-        offscreenVideo.currentTime = sampleTimestamps[currentSampleIndex];
+        vidEl.currentTime = sampleTimestamps[currentSampleIndex];
       };
 
       const handleSeeked = () => {
-        if (offscreenVideo.videoWidth > 0 && offscreenVideo.videoHeight > 0) {
+        if (vidEl.videoWidth > 0 && vidEl.videoHeight > 0) {
           const col = currentSampleIndex % config.cols;
           const row = Math.floor(currentSampleIndex / config.cols);
           const x = col * config.tileWidth;
           const y = row * config.tileHeight;
           try {
             ctx.drawImage(
-              offscreenVideo,
+              vidEl,
               0,
               0,
-              offscreenVideo.videoWidth,
-              offscreenVideo.videoHeight,
+              vidEl.videoWidth,
+              vidEl.videoHeight,
               x,
               y,
               config.tileWidth,
@@ -157,11 +181,11 @@ export async function generateContactSheet(
         seekNext();
       };
 
-      offscreenVideo.addEventListener('seeked', handleSeeked);
-      offscreenVideo.addEventListener('loadedmetadata', () => {
+      vidEl.addEventListener('seeked', handleSeeked);
+      vidEl.addEventListener('loadedmetadata', () => {
         seekNext();
       });
-      offscreenVideo.addEventListener('error', () => {
+      vidEl.addEventListener('error', () => {
         if (timeoutId) clearTimeout(timeoutId);
         resolve(false);
       });
@@ -171,7 +195,7 @@ export async function generateContactSheet(
         resolve(successfulFrames > 0);
       }, 5000);
 
-      offscreenVideo.load();
+      vidEl.load();
     });
 
     // Only export and cache if real frames were captured
@@ -189,5 +213,14 @@ export async function generateContactSheet(
     return null;
   } catch {
     return null;
+  } finally {
+    if (offscreenVideo) {
+      try {
+        offscreenVideo.pause();
+        offscreenVideo.removeAttribute('src');
+        offscreenVideo.load();
+        offscreenVideo.remove();
+      } catch {}
+    }
   }
 }

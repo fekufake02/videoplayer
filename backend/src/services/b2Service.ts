@@ -224,11 +224,20 @@ class B2Service {
       await client.send(command);
       return true;
     } catch (error: any) {
-      if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      const status = error?.$metadata?.httpStatusCode;
+      if (
+        error?.name === 'NotFound' ||
+        error?.name === 'NoSuchKey' ||
+        error?.name === 'Forbidden' ||
+        error?.name === 'AccessDenied' ||
+        status === 404 ||
+        status === 403 ||
+        status === 400
+      ) {
         return false;
       }
-      console.warn(`checkObjectExists network warning for ${storageKey}:`, error.message || error);
-      return true;
+      console.warn(`checkObjectExists warning for ${storageKey} on ${storageAccount}:`, error?.message || error);
+      return false;
     }
   }
 

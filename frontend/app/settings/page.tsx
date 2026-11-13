@@ -94,6 +94,7 @@ export default function SettingsPage() {
   const [passwordErrorMsg, setPasswordErrorMsg] = useState<string>('');
 
   // Clear history state
+  const [confirmClearHistory, setConfirmClearHistory] = useState<boolean>(false);
   const [isClearingHistory, setIsClearingHistory] = useState<boolean>(false);
   const [historyClearMsg, setHistoryClearMsg] = useState<string>('');
 
@@ -190,12 +191,12 @@ export default function SettingsPage() {
   };
 
   const handleClearHistory = async () => {
-    if (!window.confirm('Clear all watch progress and played history? This cannot be undone.')) return;
     setIsClearingHistory(true);
     setHistoryClearMsg('');
     try {
       const res = await api.clearWatchHistory();
       if (res.success) {
+        setConfirmClearHistory(false);
         setHistoryClearMsg(res.message || 'Watch history successfully cleared.');
         setTimeout(() => setHistoryClearMsg(''), 4000);
       }
@@ -306,7 +307,7 @@ export default function SettingsPage() {
         )}
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 border-b border-border scrollbar-none">
+        <div className="flex items-center gap-1 overflow-x-auto pb-1 border-b border-border [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -974,14 +975,34 @@ export default function SettingsPage() {
                     Removes all playback resumes, progress percentages, and continue watching markers. Video files are untouched.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleClearHistory}
-                  disabled={isClearingHistory}
-                  className="px-3.5 py-2 bg-danger/10 hover:bg-danger/20 text-danger border border-danger/30 text-xs font-medium rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-50"
-                >
-                  {isClearingHistory ? 'Clearing...' : 'Clear History'}
-                </button>
+                {confirmClearHistory ? (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleClearHistory}
+                      disabled={isClearingHistory}
+                      className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {isClearingHistory ? 'Clearing...' : 'Confirm Clear'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearHistory(false)}
+                      disabled={isClearingHistory}
+                      className="px-3 py-2 bg-surface-elevated hover:bg-surface-hover text-text-secondary text-xs font-medium rounded-lg border border-border transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearHistory(true)}
+                    className="px-3.5 py-2 bg-danger/10 hover:bg-danger/20 text-danger border border-danger/30 text-xs font-medium rounded-lg transition-colors cursor-pointer shrink-0"
+                  >
+                    Clear History
+                  </button>
+                )}
               </div>
             </section>
           </div>
