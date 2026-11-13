@@ -375,6 +375,15 @@ function loadDriveVideosFromDisk() {
       if (Array.isArray(list) && list.length > 0) {
         list.forEach((v) => {
           if (v && v._id) {
+            if (
+              !v.thumbnailKey &&
+              v.driveFileId &&
+              !v.driveFileId.startsWith('drive-') &&
+              !v.driveFileId.includes('_sample_') &&
+              (!v.thumbnailUrl || v.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+            ) {
+              v.thumbnailUrl = `https://drive.google.com/thumbnail?id=${v.driveFileId}&sz=w1280`;
+            }
             globalDriveVideos.set(v._id, v);
           }
         });
@@ -415,17 +424,23 @@ async function initialDriveFolderSync() {
       const seenIds = new Set<string>();
       while ((match = entryRegex.exec(html)) !== null) {
         const fileId = match[1];
-        const rawThumb = match[2];
         const rawTitle = match[3].trim();
         if (/\.(mp4|m4v|mkv|webm|mov|avi|ts)$/i.test(rawTitle) && !seenIds.has(fileId)) {
           seenIds.add(fileId);
-          const highRes = rawThumb.includes('=s190') ? rawThumb.replace('=s190', '=s1280') : rawThumb;
+          const canonicalThumb = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1280`;
           let existing = Array.from(globalDriveVideos.values()).find((v) => v.driveFileId === fileId);
           if (existing) {
             if (!existing.customTitle) {
               existing.title = rawTitle.replace(/\.[^/.]+$/, '');
             }
             existing.originalFilename = existing.originalFilename || rawTitle;
+            if (
+              !existing.thumbnailKey &&
+              (!existing.thumbnailUrl ||
+                existing.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+            ) {
+              existing.thumbnailUrl = canonicalThumb;
+            }
             existing.folderId = folderId;
           } else {
             const newId = 'drive-' + crypto.randomBytes(4).toString('hex');
@@ -436,7 +451,7 @@ async function initialDriveFolderSync() {
               originalFilename: rawTitle,
               mimeType: 'video/mp4',
               size: 0,
-              thumbnailUrl: highRes,
+              thumbnailUrl: canonicalThumb,
               driveViewUrl: `https://drive.google.com/file/d/${fileId}/view`,
               driveStreamUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
               folderId,
@@ -1656,7 +1671,7 @@ export async function GET(
       );
     }
 
-    // Refresh B2 thumbnail URLs for items that have thumbnailKey
+    // Refresh B2 thumbnail URLs for items that have thumbnailKey, or normalize expiring Drive storage URLs
     const resolvedList = await Promise.all(
       list.map(async (v) => {
         if (v.thumbnailKey) {
@@ -1673,6 +1688,13 @@ export async function GET(
           if (!v.thumbnailUrl) {
             v.thumbnailUrl = `/api/upload-receiver?key=${encodeURIComponent(v.thumbnailKey)}`;
           }
+        } else if (
+          v.driveFileId &&
+          !v.driveFileId.startsWith('drive-') &&
+          !v.driveFileId.includes('_sample_') &&
+          (!v.thumbnailUrl || v.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+        ) {
+          v.thumbnailUrl = `https://drive.google.com/thumbnail?id=${v.driveFileId}&sz=w1280`;
         }
         return v;
       })
@@ -1898,6 +1920,13 @@ export async function GET(
       if (!video.thumbnailUrl) {
         video.thumbnailUrl = `/api/upload-receiver?key=${encodeURIComponent(video.thumbnailKey)}`;
       }
+    } else if (
+      video.driveFileId &&
+      !video.driveFileId.startsWith('drive-') &&
+      !video.driveFileId.includes('_sample_') &&
+      (!video.thumbnailUrl || video.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+    ) {
+      video.thumbnailUrl = `https://drive.google.com/thumbnail?id=${video.driveFileId}&sz=w1280`;
     }
 
     return NextResponse.json({
@@ -2353,17 +2382,16 @@ export async function POST(
           let match;
           while ((match = entryRegex.exec(html)) !== null) {
             const fileId = match[1];
-            const rawThumb = match[2];
             const rawTitle = match[3].trim();
             if (/\.(mp4|m4v|mkv|webm|mov|avi|ts)$/i.test(rawTitle) && !seenIds.has(fileId)) {
               seenIds.add(fileId);
-              const highRes = rawThumb.includes('=s190') ? rawThumb.replace('=s190', '=s1280') : rawThumb;
+              const canonicalThumb = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1280`;
               fetchedFiles.push({
                 id: fileId,
                 title: rawTitle.replace(/\.[^/.]+$/, ''),
                 filename: rawTitle,
                 mimeType: 'video/mp4',
-                thumbUrl: highRes,
+                thumbUrl: canonicalThumb,
               });
             }
           }
@@ -2382,6 +2410,13 @@ export async function POST(
               existing.title = f.title;
             }
             existing.originalFilename = existing.originalFilename || f.filename;
+            if (
+              !existing.thumbnailKey &&
+              (!existing.thumbnailUrl ||
+                existing.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+            ) {
+              existing.thumbnailUrl = `https://drive.google.com/thumbnail?id=${f.id}&sz=w1280`;
+            }
             existing.folderId = folderId;
             existing.lastSyncedAt = new Date().toISOString();
           } else {
@@ -2394,7 +2429,7 @@ export async function POST(
               originalFilename: f.filename,
               mimeType: f.mimeType,
               size: (f as any).size || 0,
-              thumbnailUrl: f.thumbUrl || `https://drive.google.com/thumbnail?id=${f.id}&sz=w1280`,
+              thumbnailUrl: `https://drive.google.com/thumbnail?id=${f.id}&sz=w1280`,
               driveViewUrl: `https://drive.google.com/file/d/${f.id}/view`,
               driveStreamUrl: `https://drive.google.com/uc?export=download&id=${f.id}`,
               folderId,

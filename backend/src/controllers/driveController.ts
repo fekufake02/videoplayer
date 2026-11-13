@@ -60,6 +60,13 @@ export const listDriveVideos = async (req: AuthenticatedRequest, res: Response):
             );
             if (b2Url) item.thumbnailUrl = b2Url;
           } catch {}
+        } else if (
+          item.driveFileId &&
+          !item.driveFileId.startsWith('drive-') &&
+          !item.driveFileId.includes('_sample_') &&
+          (!item.thumbnailUrl || item.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+        ) {
+          item.thumbnailUrl = `https://drive.google.com/thumbnail?id=${item.driveFileId}&sz=w1280`;
         }
         return item;
       })
@@ -136,6 +143,13 @@ export const getDriveVideoDetails = async (req: AuthenticatedRequest, res: Respo
         );
         if (b2Url) item.thumbnailUrl = b2Url;
       } catch {}
+    } else if (
+      item.driveFileId &&
+      !item.driveFileId.startsWith('drive-') &&
+      !item.driveFileId.includes('_sample_') &&
+      (!item.thumbnailUrl || item.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+    ) {
+      item.thumbnailUrl = `https://drive.google.com/thumbnail?id=${item.driveFileId}&sz=w1280`;
     }
 
     res.status(200).json({
@@ -198,6 +212,13 @@ export const updateDriveVideoMetadata = async (req: AuthenticatedRequest, res: R
         );
         if (b2Url) item.thumbnailUrl = b2Url;
       } catch {}
+    } else if (
+      item.driveFileId &&
+      !item.driveFileId.startsWith('drive-') &&
+      !item.driveFileId.includes('_sample_') &&
+      (!item.thumbnailUrl || item.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/'))
+    ) {
+      item.thumbnailUrl = `https://drive.google.com/thumbnail?id=${item.driveFileId}&sz=w1280`;
     }
 
     res.status(200).json({

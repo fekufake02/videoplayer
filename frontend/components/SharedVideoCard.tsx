@@ -75,8 +75,31 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
   const [collections, setCollections] = useState<ICollection[]>([]);
   const [playlists, setPlaylists] = useState<IPlaylist[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(video.thumbnailUrl || null);
-  const [driveThumbTriedProxy, setDriveThumbTriedProxy] = useState(false);
+  const isDrive = sourceType === 'drive';
+  const driveFileId = isDrive ? (video as IDriveVideo).driveFileId : undefined;
+  const isRealDriveId = Boolean(
+    driveFileId && !driveFileId.startsWith('drive-') && !driveFileId.includes('_sample_')
+  );
+  const defaultDriveThumb = isRealDriveId
+    ? `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w1280`
+    : null;
+  const secondaryDriveThumb = isRealDriveId
+    ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1280`
+    : null;
+
+  const getInitialThumb = (): string | null => {
+    const raw = video.thumbnailUrl || null;
+    if (isDrive && defaultDriveThumb) {
+      const hasCustomB2Key = Boolean((video as IDriveVideo).thumbnailKey);
+      if (!raw || (!hasCustomB2Key && raw.includes('lh3.googleusercontent.com/drive-storage/'))) {
+        return defaultDriveThumb;
+      }
+    }
+    return raw;
+  };
+
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(getInitialThumb);
+  const [driveThumbStage, setDriveThumbStage] = useState<'primary' | 'default' | 'lh3' | 'proxy'>('primary');
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -84,12 +107,13 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
 
   // Synchronize thumbnail and favorite states when video prop changes
   useEffect(() => {
-    setThumbnailUrl(video.thumbnailUrl || null);
-    setDriveThumbTriedProxy(false);
+    setThumbnailUrl(getInitialThumb());
+    setDriveThumbStage('primary');
     setImageLoaded(false);
     setImageError(false);
     setIsFavorite(Boolean(video.favorite));
-  }, [video._id, video.thumbnailUrl, video.favorite]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video._id, video.thumbnailUrl, video.favorite, driveFileId]);
 
   // Close context menu on outside click or Escape
   useEffect(() => {
@@ -121,7 +145,6 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
     };
   }, [showMenu]);
 
-  const isDrive = sourceType === 'drive';
   const watchHref = isDrive ? `/drive/watch/${video._id}` : `/watch/${video._id}`;
 
   // Get playback position
@@ -293,17 +316,21 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
       >
         {isDrive ? (
           <>
-            {/* Drive Fallback Graphic */}
-            <div className="absolute inset-0 bg-gradient-to-br from-[#0E1017] via-[#131620] to-[#090A0F] flex flex-col items-center justify-center p-3 text-center">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-1 group-hover:scale-105 transition-transform">
-                <Cloud className="w-5 h-5 text-indigo-400" />
+            {/* Subtle loading shimmer or final fallback only if all Drive thumbnail fallbacks fail */}
+            {(!thumbnailUrl || imageError) ? (
+              <div className="absolute inset-0 bg-gradient-to-br from-[#0E1017] via-[#131620] to-[#090A0F] flex flex-col items-center justify-center p-3 text-center">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-1 group-hover:scale-105 transition-transform">
+                  <Cloud className="w-5 h-5 text-indigo-400" />
+                </div>
+                <span className="text-[11px] text-[#73798B] font-medium line-clamp-1 max-w-[85%]">
+                  {video.title}
+                </span>
               </div>
-              <span className="text-[11px] text-[#73798B] font-medium line-clamp-1 max-w-[85%]">
-                {video.title}
-              </span>
-            </div>
+            ) : !imageLoaded ? (
+              <div className="absolute inset-0 bg-[#131620] animate-pulse" />
+            ) : null}
 
-            {/* Drive Thumbnail Image with proxy fallback */}
+            {/* Drive Thumbnail Image with canonical Drive default & proxy fallback */}
             {thumbnailUrl && !imageError && (
               <img
                 src={thumbnailUrl}
@@ -311,14 +338,35 @@ export const SharedVideoCard: React.FC<SharedVideoCardProps> = ({
                 referrerPolicy="no-referrer"
                 onLoad={() => setImageLoaded(true)}
                 onError={() => {
-                  if (!driveThumbTriedProxy && thumbnailUrl.startsWith('http')) {
-                    setDriveThumbTriedProxy(true);
-                    setThumbnailUrl(`/api/stream-proxy?url=${encodeURIComponent(thumbnailUrl)}`);
+                  if (
+                    driveThumbStage === 'primary' &&
+                    defaultDriveThumb &&
+                    thumbnailUrl !== defaultDriveThumb
+                  ) {
+                    setDriveThumbStage('default');
+                    setImageLoaded(false);
+                    setThumbnailUrl(defaultDriveThumb);
+                  } else if (
+                    (driveThumbStage === 'primary' || driveThumbStage === 'default') &&
+                    secondaryDriveThumb &&
+                    thumbnailUrl !== secondaryDriveThumb
+                  ) {
+                    setDriveThumbStage('lh3');
+                    setImageLoaded(false);
+                    setThumbnailUrl(secondaryDriveThumb);
+                  } else if (
+                    driveThumbStage !== 'proxy' &&
+                    (defaultDriveThumb || thumbnailUrl.startsWith('http'))
+                  ) {
+                    const targetForProxy = defaultDriveThumb || thumbnailUrl;
+                    setDriveThumbStage('proxy');
+                    setImageLoaded(false);
+                    setThumbnailUrl(`/api/stream-proxy?url=${encodeURIComponent(targetForProxy)}`);
                   } else {
                     setImageError(true);
                   }
                 }}
-                className={`absolute inset-0 w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.025] ${
+                className={`absolute inset-0 w-full h-full object-cover transition-all duration-200 group-hover:scale-[1.025] ${
                   imageLoaded ? 'opacity-100' : 'opacity-0'
                 }`}
               />

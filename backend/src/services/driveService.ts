@@ -112,7 +112,7 @@ export class DriveService {
                   originalFilename: f.name || `${f.id}.mp4`,
                   mimeType: f.mimeType || this.guessMimeType(f.name),
                   size: parseInt(f.size || '0', 10),
-                  thumbnailUrl: f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+/, '=s1280') : `https://drive.google.com/thumbnail?id=${f.id}&sz=w1280`,
+                  thumbnailUrl: `https://drive.google.com/thumbnail?id=${f.id}&sz=w1280`,
                   driveViewUrl: f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`,
                   driveStreamUrl: `https://drive.google.com/uc?export=download&id=${f.id}`,
                 });
@@ -146,19 +146,17 @@ export class DriveService {
         let match;
         while ((match = entryRegex.exec(html)) !== null) {
           const fileId = match[1];
-          const rawThumb = match[2];
           const rawTitle = match[3].trim();
 
           if (this.isVideoFile(rawTitle) && !seenIds.has(fileId)) {
             seenIds.add(fileId);
-            const highResThumb = rawThumb.includes('=s190') ? rawThumb.replace('=s190', '=s1280') : rawThumb;
             files.push({
               driveFileId: fileId,
               title: rawTitle.replace(/\.[^/.]+$/, ''),
               originalFilename: rawTitle,
               mimeType: this.guessMimeType(rawTitle),
               size: 0,
-              thumbnailUrl: highResThumb || `https://drive.google.com/thumbnail?id=${fileId}&sz=w1280`,
+              thumbnailUrl: `https://drive.google.com/thumbnail?id=${fileId}&sz=w1280`,
               driveViewUrl: `https://drive.google.com/file/d/${fileId}/view`,
               driveStreamUrl: `https://drive.google.com/uc?export=download&id=${fileId}`,
             });
@@ -278,8 +276,14 @@ export class DriveService {
           } catch (e) {
             console.warn(`Failed to refresh B2 thumbnail for Drive video ${existing.driveFileId}:`, e);
           }
-        } else if (!existing.thumbnailUrl && item.thumbnailUrl) {
-          existing.thumbnailUrl = item.thumbnailUrl;
+        } else if (
+          !existing.thumbnailUrl ||
+          existing.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/')
+        ) {
+          existing.thumbnailUrl =
+            item.thumbnailUrl && !item.thumbnailUrl.includes('lh3.googleusercontent.com/drive-storage/')
+              ? item.thumbnailUrl
+              : `https://drive.google.com/thumbnail?id=${existing.driveFileId}&sz=w1280`;
         }
 
         await existing.save();
