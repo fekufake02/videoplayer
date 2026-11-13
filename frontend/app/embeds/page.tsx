@@ -144,7 +144,8 @@ export default function EmbedVideosPage() {
   const autoCaptureDirectThumbnail = async (embed: IEmbedVideo) => {
     if (embed.thumbnailUrl || !embed.directMediaUrl) return;
     try {
-      const proxied = `/api/stream-proxy?url=${encodeURIComponent(embed.directMediaUrl)}`;
+      const refSuffix = embed.sourceUrl ? `&ref=${encodeURIComponent(embed.sourceUrl)}` : '';
+      const proxied = `/api/stream-proxy?url=${encodeURIComponent(embed.directMediaUrl)}${refSuffix}`;
       const canvas = await extractRealVideoFrameCanvas(proxied, 3).catch(() => null);
       if (!canvas) return;
       const [blob, blurhash] = await Promise.all([

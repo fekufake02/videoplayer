@@ -420,28 +420,47 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
         }
 
         if (!embedUrl) {
-          const twitterPlayer = extractMetaTag(html, ['twitter:player']);
+          const twitterPlayer = extractMetaTag(html, ['twitter:player', 'og:video:iframe']);
           if (twitterPlayer) {
             embedUrl = resolveMaybeRelativeUrl(twitterPlayer, resp.url || sourceUrl);
           }
         }
 
+        if (!embedUrl) {
+          const itemPropEmbed =
+            /<(?:meta|link)[^>]+itemprop=["']embedUrl["'][^>]+(?:content|href)=["']([^"']+)["'][^>]*>/i.exec(html)?.[1] ||
+            /<(?:meta|link)[^>]+(?:content|href)=["']([^"']+)["'][^>]+itemprop=["']embedUrl["'][^>]*>/i.exec(html)?.[1];
+          if (itemPropEmbed) {
+            embedUrl = resolveMaybeRelativeUrl(itemPropEmbed, resp.url || sourceUrl);
+          }
+        }
+
         if (!directMediaUrl) {
-          const videoSrcMatch =
-            /<(?:video|source)[^>]+src=["']([^"']+\.(?:mp4|webm|m3u8|mov)[^"']*)["']/i.exec(html) ||
-            /["'](https?:\/\/[^"'\s<>]+\.(?:mp4|m3u8|webm)(?:\?[^"'\s<>]*)?)["']/i.exec(html);
-          if (videoSrcMatch?.[1]) {
-            const cleaned = videoSrcMatch[1].replace(/\\u002F/gi, '/').replace(/\\\//g, '/');
+          const sourceTagMatch =
+            /<source[^>]+src=["']([^"']+)["'][^>]*type=["'](?:application\/x-mpegurl|application\/vnd\.apple\.mpegurl|video\/[^"']+)["'][^>]*>/i.exec(html) ||
+            /<source[^>]+type=["'](?:application\/x-mpegurl|application\/vnd\.apple\.mpegurl|video\/[^"']+)["'][^>]*src=["']([^"']+)["'][^>]*>/i.exec(html) ||
+            /<(?:video|source)[^>]+src=["']([^"']+(?:\.(?:mp4|webm|m3u8|mov|m4v)|\/get_file\/)[^"']*)["']/i.exec(html) ||
+            /["']((?:https?:\/\/|\/get_file\/)[^"'\s<>]+\.(?:mp4|m3u8|webm)(?:\?[^"'\s<>]*)?)["']/i.exec(html) ||
+            /(?:video_url|video_alt_url|video_url_hd|hlsUrl|hls_url|mp4Url|file)\s*[:=]\s*["']([^"']+(?:\.(?:mp4|m3u8|webm)|\/get_file\/)[^"']*)["']/i.exec(html);
+          if (sourceTagMatch?.[1]) {
+            const cleaned = sourceTagMatch[1].replace(/\\u002F/gi, '/').replace(/\\\//g, '/');
             directMediaUrl = resolveMaybeRelativeUrl(cleaned, resp.url || sourceUrl);
           }
         }
 
         if (!embedUrl) {
-          const iframeMatch = /<iframe[^>]+src=["']([^"']+)["'][^>]*>/i.exec(html);
-          if (iframeMatch?.[1]) {
+          const iframeRegex = /<iframe[^>]+src=["']([^"']+)["'][^>]*>/gi;
+          let iframeMatch: RegExpExecArray | null;
+          while ((iframeMatch = iframeRegex.exec(html)) !== null) {
             const candidateIframe = resolveMaybeRelativeUrl(iframeMatch[1], resp.url || sourceUrl);
-            if (candidateIframe && !/googletagmanager|doubleclick|googlesyndication|facebook\.com\/tr/i.test(candidateIframe)) {
+            if (
+              candidateIframe &&
+              !/googletagmanager|doubleclick|googlesyndication|facebook\.com\/|platform\.twitter|addthis|sharethis|disqus|recaptcha|hcaptcha|turnstile|cloudflare|adservice|popads|exoclick|juicyads|trafficjunky|chaturbate|stripchat|livejasmin|bongacams/i.test(
+                candidateIframe
+              )
+            ) {
               embedUrl = candidateIframe;
+              break;
             }
           }
         }
@@ -459,11 +478,56 @@ export async function extractEmbedMetadata(rawUrl: string): Promise<ExtractedEmb
     title = pathTail || `${known.platform} Video (${sourceDomain})`;
   }
 
-  const effectiveEmbedUrl = embedUrl || (!directMediaUrl ? sourceUrl : undefined);
+  const isSamePageAsSource = (candidate?: string): boolean => {
+    if (!candidate) return false;
+    try {
+      const uc = new URL(candidate);
+      const us = new URL(sourceUrl);
+      const hc = uc.hostname.toLowerCase().replace(/^www\./, '');
+      const hs = us.hostname.toLowerCase().replace(/^www\./, '');
+      const pc = uc.pathname.replace(/\/+$/, '') || '/';
+      const ps = us.pathname.replace(/\/+$/, '') || '/';
+      return hc === hs && pc === ps;
+    } catch {
+      return candidate === sourceUrl;
+    }
+  };
+
+  // Only treat genuine player URLs as embedUrl (never mirror the raw webpage URL as an embed iframe)
+  let effectiveEmbedUrl = embedUrl && !isSamePageAsSource(embedUrl) ? embedUrl : undefined;
+  if (effectiveEmbedUrl && !known.embedUrl) {
+    try {
+      const fCtrl = new AbortController();
+      const fTimer = setTimeout(() => fCtrl.abort(), 3000);
+      const fResp = await fetch(effectiveEmbedUrl, {
+        method: 'HEAD',
+        redirect: 'follow',
+        signal: fCtrl.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+      });
+      clearTimeout(fTimer);
+      const xfo = (fResp.headers.get('x-frame-options') || '').toLowerCase();
+      const csp = (fResp.headers.get('content-security-policy') || '').toLowerCase();
+      const cspMatch = csp.match(/frame-ancestors\s+([^;]+)/i);
+      const blocksFrame =
+        xfo.includes('deny') ||
+        xfo.includes('sameorigin') ||
+        (cspMatch ? /'none'|'self'/i.test(cspMatch[1]) && !cspMatch[1].includes('*') : false);
+      if (blocksFrame) {
+        effectiveEmbedUrl = undefined;
+      }
+    } catch {
+      // Keep effectiveEmbedUrl if check timed out
+    }
+  }
+
   let playbackType: ExtractedPlaybackType = 'iframe';
   if (effectiveEmbedUrl && directMediaUrl) {
     playbackType = 'hybrid';
-  } else if (directMediaUrl && !embedUrl) {
+  } else if (directMediaUrl) {
     playbackType = 'direct';
   }
 

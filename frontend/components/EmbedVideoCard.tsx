@@ -156,7 +156,8 @@ export const EmbedVideoCard: React.FC<EmbedVideoCardProps> = ({
               if (!triedProxy && thumbnailUrl.startsWith('http')) {
                 setTriedProxy(true);
                 setImageLoaded(false);
-                setThumbnailUrl(`/api/stream-proxy?url=${encodeURIComponent(thumbnailUrl)}`);
+                const refSuffix = video.sourceUrl ? `&ref=${encodeURIComponent(video.sourceUrl)}` : '';
+                setThumbnailUrl(`/api/stream-proxy?url=${encodeURIComponent(thumbnailUrl)}${refSuffix}`);
               } else {
                 setImageError(true);
               }

@@ -1544,10 +1544,13 @@ export async function GET(
     return NextResponse.redirect(resolvedStream);
   }
 
-  // 8.05 Same-Origin CORS & Range Streaming Proxy: /api/stream-proxy?url=...
-  // Ensures mpegts.js / hls.js / offscreen frame capture and B2 presigned URLs work with Range seeking without CORS failures
+  // 8.05 Same-Origin CORS & Range Streaming Proxy: /api/stream-proxy?url=...&ref=...&probe=1
+  // Ensures mpegts.js / hls.js / offscreen frame capture and hotlink-protected external streams work cleanly
   if (path === 'stream-proxy') {
     const targetUrlParam = req.nextUrl.searchParams.get('url');
+    const refParam = req.nextUrl.searchParams.get('ref');
+    const isProbe = req.nextUrl.searchParams.get('probe') === '1';
+
     if (!targetUrlParam) {
       return new NextResponse('Missing url parameter', { status: 400 });
     }
@@ -1563,25 +1566,54 @@ export async function GET(
       return new NextResponse('Unsupported protocol', { status: 400 });
     }
 
-    const host = parsedUrl.hostname.toLowerCase();
-    const isPrivateHost =
-      host === 'localhost' ||
-      host === '::1' ||
-      host.startsWith('127.') ||
-      host.startsWith('10.') ||
-      host.startsWith('192.168.') ||
-      host.startsWith('169.254.') ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+    const isBlockedHost = (hostname: string) => {
+      const h = hostname.toLowerCase();
+      return (
+        h === 'localhost' ||
+        h === '::1' ||
+        h === '[::1]' ||
+        h.endsWith('.local') ||
+        h.endsWith('.internal') ||
+        h.startsWith('127.') ||
+        h.startsWith('10.') ||
+        h.startsWith('192.168.') ||
+        h.startsWith('169.254.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)
+      );
+    };
 
-    if (isPrivateHost) {
+    if (isBlockedHost(parsedUrl.hostname)) {
       return new NextResponse('Forbidden host', { status: 403 });
+    }
+
+    let safeReferer: string | undefined;
+    let safeOrigin: string | undefined;
+    if (refParam) {
+      try {
+        const refUrl = new URL(refParam);
+        if ((refUrl.protocol === 'https:' || refUrl.protocol === 'http:') && !isBlockedHost(refUrl.hostname)) {
+          safeReferer = refUrl.toString();
+          safeOrigin = refUrl.origin;
+        }
+      } catch {
+        // Ignore invalid ref param
+      }
     }
 
     const rangeHeader = req.headers.get('range');
     const upstreamHeaders: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
     };
-    if (rangeHeader) {
+    if (safeReferer) {
+      upstreamHeaders['Referer'] = safeReferer;
+    }
+    if (safeOrigin) {
+      upstreamHeaders['Origin'] = safeOrigin;
+    }
+    if (rangeHeader && !isProbe) {
       upstreamHeaders['Range'] = rangeHeader;
     }
 
@@ -1592,6 +1624,112 @@ export async function GET(
         signal: req.signal,
       });
 
+      const finalUrl = upstreamResp.url || parsedUrl.toString();
+      if (isBlockedHost(new URL(finalUrl).hostname)) {
+        return new NextResponse('Forbidden redirect host', { status: 403 });
+      }
+
+      const rawCt = (upstreamResp.headers.get('content-type') || '').toLowerCase();
+      const lowerFinalPath = new URL(finalUrl).pathname.toLowerCase();
+      const lowerOrigPath = parsedUrl.pathname.toLowerCase();
+
+      if (isProbe) {
+        let headSnippet = '';
+        try {
+          const reader = upstreamResp.body?.getReader();
+          if (reader) {
+            const { value } = await reader.read();
+            if (value) {
+              headSnippet = new TextDecoder('utf-8', { fatal: false }).decode(value.slice(0, 256));
+            }
+            await reader.cancel().catch(() => {});
+          }
+        } catch {
+          // Ignore probe read errors
+        }
+        const looksLikeM3u8Text = headSnippet.trimStart().startsWith('#EXTM3U');
+        const isHls =
+          looksLikeM3u8Text ||
+          rawCt.includes('mpegurl') ||
+          lowerFinalPath.endsWith('.m3u8') ||
+          lowerOrigPath.endsWith('.m3u8');
+
+        return NextResponse.json(
+          {
+            ok: upstreamResp.ok,
+            status: upstreamResp.status,
+            contentType: isHls ? 'application/vnd.apple.mpegurl' : rawCt || 'video/mp4',
+            isHls,
+            finalUrl,
+          },
+          {
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Cache-Control': 'no-store',
+            },
+          }
+        );
+      }
+
+      const contentLengthHeader = Number(upstreamResp.headers.get('content-length') || '0');
+      const maybePlaylist =
+        rawCt.includes('mpegurl') ||
+        lowerFinalPath.endsWith('.m3u8') ||
+        lowerOrigPath.endsWith('.m3u8') ||
+        (!rangeHeader &&
+          (rawCt.startsWith('text/plain') ||
+            (rawCt.includes('octet-stream') && contentLengthHeader > 0 && contentLengthHeader < 524_288)));
+
+      if (maybePlaylist && upstreamResp.ok) {
+        const playlistText = await upstreamResp.text();
+        if (playlistText.trimStart().startsWith('#EXTM3U')) {
+          const rewriteTarget = (rawRef: string) => {
+            try {
+              const abs = new URL(rawRef.trim(), finalUrl).toString();
+              const refSuffix = safeReferer ? `&ref=${encodeURIComponent(safeReferer)}` : '';
+              return `/api/stream-proxy?url=${encodeURIComponent(abs)}${refSuffix}`;
+            } catch {
+              return rawRef;
+            }
+          };
+
+          const rewritten = playlistText
+            .split(/\r?\n/)
+            .map((line) => {
+              const trimmed = line.trim();
+              if (!trimmed) return line;
+              if (trimmed.startsWith('#')) {
+                return line.replace(/URI="([^"]+)"/gi, (_, uri) => `URI="${rewriteTarget(uri)}"`);
+              }
+              return rewriteTarget(trimmed);
+            })
+            .join('\n');
+
+          return new NextResponse(rewritten, {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/vnd.apple.mpegurl',
+              'X-Stream-Format': 'hls',
+              'Cache-Control': 'no-store',
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+              'Access-Control-Allow-Headers': '*',
+            },
+          });
+        }
+
+        // Not an M3U8 playlist despite text/octet-stream headers; return the text/bytes directly
+        return new NextResponse(playlistText, {
+          status: upstreamResp.status,
+          headers: {
+            'Content-Type': rawCt || 'application/octet-stream',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+          },
+        });
+      }
+
       const respHeaders = new Headers();
       respHeaders.set('Accept-Ranges', 'bytes');
       respHeaders.set('Cache-Control', 'no-transform');
@@ -1599,15 +1737,14 @@ export async function GET(
       respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       respHeaders.set('Access-Control-Allow-Headers', '*');
 
-      let contentType = (upstreamResp.headers.get('content-type') || '').toLowerCase();
+      let contentType = rawCt;
       if (!contentType || contentType.includes('octet-stream')) {
-        const lowerPath = parsedUrl.pathname.toLowerCase();
-        if (lowerPath.endsWith('.webm')) contentType = 'video/webm';
-        else if (lowerPath.endsWith('.mov')) contentType = 'video/quicktime';
-        else if (lowerPath.endsWith('.mkv')) contentType = 'video/x-matroska';
-        else if (lowerPath.endsWith('.m3u8')) contentType = 'application/vnd.apple.mpegurl';
-        else if (/\.(m2?ts|mts)$/.test(lowerPath)) contentType = 'video/mp2t';
-        else if (lowerPath.endsWith('.flv')) contentType = 'video/x-flv';
+        if (lowerFinalPath.endsWith('.webm') || lowerOrigPath.endsWith('.webm')) contentType = 'video/webm';
+        else if (lowerFinalPath.endsWith('.mov') || lowerOrigPath.endsWith('.mov')) contentType = 'video/quicktime';
+        else if (lowerFinalPath.endsWith('.mkv') || lowerOrigPath.endsWith('.mkv')) contentType = 'video/x-matroska';
+        else if (lowerFinalPath.endsWith('.m3u8') || lowerOrigPath.endsWith('.m3u8')) contentType = 'application/vnd.apple.mpegurl';
+        else if (/\.(m2?ts|mts)$/.test(lowerFinalPath) || /\.(m2?ts|mts)$/.test(lowerOrigPath)) contentType = 'video/mp2t';
+        else if (lowerFinalPath.endsWith('.flv') || lowerOrigPath.endsWith('.flv')) contentType = 'video/x-flv';
         else contentType = 'video/mp4';
       }
       respHeaders.set('Content-Type', contentType);
@@ -2836,8 +2973,10 @@ export async function POST(
         try {
           const existing = await col.findOne({ sourceUrl: extracted.sourceUrl });
           if (existing) {
+            const safeExistingEmbedUrl =
+              existing.embedUrl && existing.embedUrl !== existing.sourceUrl ? existing.embedUrl : undefined;
             const setFields: any = {
-              embedUrl: customEmbedUrl || extracted.embedUrl || existing.embedUrl,
+              embedUrl: customEmbedUrl || extracted.embedUrl || safeExistingEmbedUrl || null,
               directMediaUrl: extracted.directMediaUrl || existing.directMediaUrl,
               playbackType: extracted.playbackType,
               platform: extracted.platform,
@@ -3072,9 +3211,9 @@ export async function POST(
           const extracted = await extractEmbedMetadata(existing.sourceUrl);
           const setFields: any = {
             playbackType: extracted.playbackType,
+            embedUrl: extracted.embedUrl || null,
             updatedAt: new Date(),
           };
-          if (extracted.embedUrl) setFields.embedUrl = extracted.embedUrl;
           if (extracted.directMediaUrl) setFields.directMediaUrl = extracted.directMediaUrl;
           if (!existing.thumbnailKey && extracted.thumbnailUrl) setFields.thumbnailUrl = extracted.thumbnailUrl;
           if (extracted.duration > 0) setFields.duration = extracted.duration;
@@ -3096,7 +3235,7 @@ export async function POST(
     }
     try {
       const extracted = await extractEmbedMetadata(local.sourceUrl);
-      if (extracted.embedUrl) local.embedUrl = extracted.embedUrl;
+      local.embedUrl = extracted.embedUrl;
       if (extracted.directMediaUrl) local.directMediaUrl = extracted.directMediaUrl;
       local.playbackType = extracted.playbackType;
       if (!local.thumbnailKey && extracted.thumbnailUrl) local.thumbnailUrl = extracted.thumbnailUrl;
@@ -3578,6 +3717,7 @@ export async function HEAD(
 
   if (path === 'stream-proxy') {
     const targetUrlParam = req.nextUrl.searchParams.get('url');
+    const refParam = req.nextUrl.searchParams.get('ref');
     if (!targetUrlParam) {
       return new NextResponse(null, { status: 400 });
     }
@@ -3590,6 +3730,7 @@ export async function HEAD(
       const isPrivateHost =
         host === 'localhost' ||
         host === '::1' ||
+        host === '[::1]' ||
         host.startsWith('127.') ||
         host.startsWith('10.') ||
         host.startsWith('192.168.') ||
@@ -3598,7 +3739,25 @@ export async function HEAD(
       if (isPrivateHost) {
         return new NextResponse(null, { status: 403 });
       }
-      const upstream = await fetch(parsed.toString(), { method: 'HEAD', redirect: 'follow', signal: req.signal });
+      const upstreamHeaders: Record<string, string> = {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      };
+      if (refParam) {
+        try {
+          const refUrl = new URL(refParam);
+          if (refUrl.protocol === 'https:' || refUrl.protocol === 'http:') {
+            upstreamHeaders['Referer'] = refUrl.toString();
+            upstreamHeaders['Origin'] = refUrl.origin;
+          }
+        } catch {}
+      }
+      const upstream = await fetch(parsed.toString(), {
+        method: 'HEAD',
+        headers: upstreamHeaders,
+        redirect: 'follow',
+        signal: req.signal,
+      });
       const headers = new Headers();
       headers.set('Accept-Ranges', 'bytes');
       headers.set('Access-Control-Allow-Origin', '*');
