@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import mongoose from 'mongoose';
 import { getB2PresignedUrl } from '../../../lib/b2Presign';
+import { extractEmbedMetadata } from '../../../lib/embedExtractor';
 
 // Disk storage for media files to survive process reloads
 const STORAGE_DIR = '/tmp/vault_media_storage';
@@ -690,6 +691,129 @@ async function hydrateMongoVideoDoc(doc: any): Promise<IVideoItem> {
     favorite: Boolean(doc.favorite),
     tags: Array.isArray(doc.tags) ? doc.tags : [],
     notes: doc.notes || '',
+  };
+}
+
+// ── Embedded External Videos Store (MongoDB primary + local disk manifest fallback) ──
+interface IEmbedVideoItem {
+  _id: string;
+  sourceUrl: string;
+  embedUrl?: string;
+  directMediaUrl?: string;
+  playbackType: 'iframe' | 'direct' | 'hybrid';
+  platform: string;
+  sourceDomain: string;
+  title: string;
+  description?: string;
+  thumbnailUrl?: string;
+  thumbnailKey?: string;
+  thumbnailStorageAccount?: 'account1' | 'account2';
+  blurhash?: string;
+  duration: number;
+  playCount: number;
+  favorite: boolean;
+  tags: string[];
+  notes?: string;
+  lastPlayedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const globalEmbedVideos: Map<string, IEmbedVideoItem> = new Map();
+const EMBED_VIDEOS_FILE = path.join(STORAGE_DIR, 'embed_videos_manifest.json');
+
+function saveEmbedVideosToDisk() {
+  try {
+    const list = Array.from(globalEmbedVideos.values());
+    fs.writeFileSync(EMBED_VIDEOS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Failed to save embed videos manifest:', err);
+  }
+}
+
+function loadEmbedVideosFromDisk() {
+  try {
+    if (fs.existsSync(EMBED_VIDEOS_FILE)) {
+      const data = fs.readFileSync(EMBED_VIDEOS_FILE, 'utf8');
+      const list: IEmbedVideoItem[] = JSON.parse(data);
+      if (Array.isArray(list)) {
+        list.forEach((v) => {
+          if (v && v._id) {
+            globalEmbedVideos.set(v._id, v);
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load embed videos manifest:', err);
+  }
+}
+
+loadEmbedVideosFromDisk();
+
+async function getMongoEmbedsCollection() {
+  const mongoUri = process.env.MONGODB_URI;
+  const isRealMongo =
+    !!mongoUri && !mongoUri.includes('<cluster>') && !mongoUri.includes('<username>');
+  if (!isRealMongo || !mongoUri) return null;
+
+  try {
+    if (mongoose.connection.readyState === 0) {
+      mongoose.set('bufferCommands', false);
+      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
+    }
+    if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+      return mongoose.connection.db.collection('embedvideos');
+    }
+  } catch (err: any) {
+    console.warn('MongoDB embedvideos connection warning:', err?.message || err);
+  }
+  return null;
+}
+
+async function hydrateEmbedItem(doc: any): Promise<IEmbedVideoItem> {
+  const id = doc._id ? doc._id.toString() : '';
+  let thumbUrl: string | undefined = doc.thumbnailUrl;
+  if (doc.thumbnailKey) {
+    try {
+      const b2Url = await getB2PresignedUrl(
+        doc.thumbnailKey,
+        7200,
+        doc.thumbnailStorageAccount || 'account2'
+      );
+      if (b2Url) {
+        thumbUrl = b2Url;
+      } else if (readDiskMedia(doc.thumbnailKey)) {
+        thumbUrl = `/api/upload-receiver?key=${encodeURIComponent(doc.thumbnailKey)}`;
+      }
+    } catch {
+      if (readDiskMedia(doc.thumbnailKey)) {
+        thumbUrl = `/api/upload-receiver?key=${encodeURIComponent(doc.thumbnailKey)}`;
+      }
+    }
+  }
+  return {
+    _id: id,
+    sourceUrl: doc.sourceUrl || '',
+    embedUrl: doc.embedUrl || undefined,
+    directMediaUrl: doc.directMediaUrl || undefined,
+    playbackType: doc.playbackType || (doc.directMediaUrl && doc.embedUrl ? 'hybrid' : doc.directMediaUrl ? 'direct' : 'iframe'),
+    platform: doc.platform || 'Web',
+    sourceDomain: doc.sourceDomain || '',
+    title: doc.title || 'Embedded Video',
+    description: doc.description || '',
+    thumbnailUrl: thumbUrl,
+    thumbnailKey: doc.thumbnailKey,
+    thumbnailStorageAccount: doc.thumbnailStorageAccount,
+    blurhash: doc.blurhash,
+    duration: typeof doc.duration === 'number' ? doc.duration : 0,
+    playCount: typeof doc.playCount === 'number' ? doc.playCount : 0,
+    favorite: Boolean(doc.favorite),
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    notes: doc.notes || '',
+    lastPlayedAt: doc.lastPlayedAt ? new Date(doc.lastPlayedAt).toISOString() : undefined,
+    createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : new Date().toISOString(),
+    updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : new Date().toISOString(),
   };
 }
 
@@ -1935,6 +2059,132 @@ export async function GET(
     });
   }
 
+  // 14. List Embedded Videos: /api/embeds
+  if (path === 'embeds') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    const searchParams = req.nextUrl.searchParams;
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
+    const search = (searchParams.get('search') || '').trim();
+    const sort = searchParams.get('sort') || 'recentlyAdded';
+    const filter = searchParams.get('filter') || 'all';
+
+    const col = await getMongoEmbedsCollection();
+    if (col) {
+      try {
+        const query: any = {};
+        if (filter === 'favorites') query.favorite = true;
+        if (search) {
+          query.$or = [
+            { title: { $regex: search, $options: 'i' } },
+            { platform: { $regex: search, $options: 'i' } },
+            { sourceDomain: { $regex: search, $options: 'i' } },
+            { tags: { $regex: search, $options: 'i' } },
+            { notes: { $regex: search, $options: 'i' } },
+          ];
+        }
+        let sortOption: any = { createdAt: -1 };
+        if (sort === 'title' || sort === 'nameAsc') sortOption = { title: 1 };
+        else if (sort === 'nameDesc') sortOption = { title: -1 };
+        else if (sort === 'oldest') sortOption = { createdAt: 1 };
+        else if (sort === 'mostPlayed') sortOption = { playCount: -1, createdAt: -1 };
+        else if (sort === 'duration') sortOption = { duration: -1 };
+
+        const total = await col.countDocuments(query);
+        const docs = await col
+          .find(query)
+          .sort(sortOption)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .toArray();
+        const embeds = await Promise.all(docs.map(hydrateEmbedItem));
+        return NextResponse.json({
+          success: true,
+          embeds,
+          total,
+          page,
+          totalPages: Math.ceil(total / limit) || 1,
+        });
+      } catch (err) {
+        console.warn('Mongo embeds list error, falling back to local store:', err);
+      }
+    }
+
+    let list = Array.from(globalEmbedVideos.values());
+    if (filter === 'favorites') list = list.filter((e) => e.favorite);
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (e) =>
+          e.title.toLowerCase().includes(q) ||
+          e.platform.toLowerCase().includes(q) ||
+          e.sourceDomain.toLowerCase().includes(q) ||
+          (e.notes && e.notes.toLowerCase().includes(q)) ||
+          (e.tags && e.tags.some((t) => t.toLowerCase().includes(q)))
+      );
+    }
+
+    list.sort((a, b) => {
+      if (sort === 'title' || sort === 'nameAsc') return a.title.localeCompare(b.title);
+      if (sort === 'nameDesc') return b.title.localeCompare(a.title);
+      if (sort === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (sort === 'mostPlayed') return (b.playCount || 0) - (a.playCount || 0);
+      if (sort === 'duration') return (b.duration || 0) - (a.duration || 0);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    const total = list.length;
+    const skip = (page - 1) * limit;
+    const embeds = await Promise.all(list.slice(skip, skip + limit).map(hydrateEmbedItem));
+    return NextResponse.json({
+      success: true,
+      embeds,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit) || 1,
+    });
+  }
+
+  // 15. Single Embedded Video Details: /api/embeds/:id
+  if (slug.length === 2 && slug[0] === 'embeds') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    const embedId = slug[1];
+    const col = await getMongoEmbedsCollection();
+    if (col && mongoose.Types.ObjectId.isValid(embedId)) {
+      try {
+        const doc = await col.findOne({ _id: new mongoose.Types.ObjectId(embedId) });
+        if (doc) {
+          const embed = await hydrateEmbedItem(doc);
+          return NextResponse.json({ success: true, embed });
+        }
+      } catch {}
+    }
+
+    const local = globalEmbedVideos.get(embedId);
+    if (!local) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Embedded video not found' } },
+        { status: 404 }
+      );
+    }
+    const embed = await hydrateEmbedItem(local);
+    return NextResponse.json({ success: true, embed });
+  }
+
   return NextResponse.json(
     { success: false, error: { message: `Route not found: ${path}` } },
     { status: 404 }
@@ -2550,6 +2800,316 @@ export async function POST(
     }
   }
 
+  // 13. Create Embed Video from URL: POST /api/embeds
+  if (path === 'embeds') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    try {
+      const body = await req.json();
+      const rawUrl = body?.url;
+      if (!rawUrl || typeof rawUrl !== 'string') {
+        return NextResponse.json(
+          { success: false, error: { message: 'Video URL is required' } },
+          { status: 400 }
+        );
+      }
+
+      const extracted = await extractEmbedMetadata(rawUrl);
+      const customTitle = typeof body.title === 'string' ? body.title.trim() : '';
+      const customEmbedUrl = typeof body.embedUrl === 'string' ? body.embedUrl.trim() : '';
+      const parsedTags = Array.isArray(body.tags)
+        ? body.tags.map((t: any) => String(t).trim()).filter(Boolean)
+        : typeof body.tags === 'string'
+          ? body.tags.split(',').map((t: string) => t.trim()).filter(Boolean)
+          : [];
+      const customNotes = typeof body.notes === 'string' ? body.notes.trim() : '';
+      const now = new Date();
+
+      const col = await getMongoEmbedsCollection();
+      if (col) {
+        try {
+          const existing = await col.findOne({ sourceUrl: extracted.sourceUrl });
+          if (existing) {
+            const setFields: any = {
+              embedUrl: customEmbedUrl || extracted.embedUrl || existing.embedUrl,
+              directMediaUrl: extracted.directMediaUrl || existing.directMediaUrl,
+              playbackType: extracted.playbackType,
+              platform: extracted.platform,
+              sourceDomain: extracted.sourceDomain,
+              title: customTitle || extracted.title || existing.title,
+              updatedAt: now,
+            };
+            if (!existing.thumbnailKey && extracted.thumbnailUrl) {
+              setFields.thumbnailUrl = extracted.thumbnailUrl;
+            }
+            if (extracted.duration > 0) setFields.duration = extracted.duration;
+            if (extracted.description) setFields.description = extracted.description;
+            if (parsedTags.length > 0) setFields.tags = parsedTags;
+            if (customNotes) setFields.notes = customNotes;
+
+            const updated = await col.findOneAndUpdate(
+              { _id: existing._id },
+              { $set: setFields },
+              { returnDocument: 'after' }
+            );
+            const embed = await hydrateEmbedItem(updated || { ...existing, ...setFields });
+            return NextResponse.json({ success: true, embed, updatedExisting: true });
+          }
+
+          const newDoc: any = {
+            sourceUrl: extracted.sourceUrl,
+            embedUrl: customEmbedUrl || extracted.embedUrl,
+            directMediaUrl: extracted.directMediaUrl,
+            playbackType: extracted.playbackType,
+            platform: extracted.platform,
+            sourceDomain: extracted.sourceDomain,
+            title: customTitle || extracted.title,
+            description: extracted.description || '',
+            thumbnailUrl: extracted.thumbnailUrl,
+            duration: extracted.duration || 0,
+            playCount: 0,
+            favorite: false,
+            tags: parsedTags,
+            notes: customNotes,
+            createdAt: now,
+            updatedAt: now,
+          };
+          const ins = await col.insertOne(newDoc);
+          const embed = await hydrateEmbedItem({ ...newDoc, _id: ins.insertedId });
+          return NextResponse.json({ success: true, embed }, { status: 201 });
+        } catch (err) {
+          console.warn('Mongo insert embed fallback to local store:', err);
+        }
+      }
+
+      // Disk/memory fallback
+      const existingLocal = Array.from(globalEmbedVideos.values()).find(
+        (e) => e.sourceUrl === extracted.sourceUrl
+      );
+      if (existingLocal) {
+        existingLocal.title = customTitle || extracted.title || existingLocal.title;
+        existingLocal.embedUrl = customEmbedUrl || extracted.embedUrl || existingLocal.embedUrl;
+        existingLocal.directMediaUrl = extracted.directMediaUrl || existingLocal.directMediaUrl;
+        existingLocal.playbackType = extracted.playbackType;
+        if (!existingLocal.thumbnailKey && extracted.thumbnailUrl) {
+          existingLocal.thumbnailUrl = extracted.thumbnailUrl;
+        }
+        if (extracted.duration > 0) existingLocal.duration = extracted.duration;
+        if (parsedTags.length > 0) existingLocal.tags = parsedTags;
+        if (customNotes) existingLocal.notes = customNotes;
+        existingLocal.updatedAt = now.toISOString();
+        saveEmbedVideosToDisk();
+        return NextResponse.json({ success: true, embed: await hydrateEmbedItem(existingLocal), updatedExisting: true });
+      }
+
+      const newId = 'embed-' + crypto.randomBytes(6).toString('hex');
+      const localItem: IEmbedVideoItem = {
+        _id: newId,
+        sourceUrl: extracted.sourceUrl,
+        embedUrl: customEmbedUrl || extracted.embedUrl,
+        directMediaUrl: extracted.directMediaUrl,
+        playbackType: extracted.playbackType,
+        platform: extracted.platform,
+        sourceDomain: extracted.sourceDomain,
+        title: customTitle || extracted.title,
+        description: extracted.description || '',
+        thumbnailUrl: extracted.thumbnailUrl,
+        duration: extracted.duration || 0,
+        playCount: 0,
+        favorite: false,
+        tags: parsedTags,
+        notes: customNotes,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      globalEmbedVideos.set(newId, localItem);
+      saveEmbedVideosToDisk();
+      return NextResponse.json({ success: true, embed: await hydrateEmbedItem(localItem) }, { status: 201 });
+    } catch (e: any) {
+      return NextResponse.json(
+        { success: false, error: { message: e?.message || 'Failed to embed video URL' } },
+        { status: 400 }
+      );
+    }
+  }
+
+  // 14. Initiate Embed Thumbnail Upload: POST /api/embeds/thumbnails/upload/initiate
+  if (path === 'embeds/thumbnails/upload/initiate') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    try {
+      const body = await req.json().catch(() => ({}));
+      const embedId = body.embedId || crypto.randomBytes(4).toString('hex');
+      const filename = (body.filename || 'thumb.webp').replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storageKey = `thumbnails/embeds/${embedId}/${crypto.randomUUID()}_${filename}`;
+      const uploadUrl = `/api/upload-receiver?key=${encodeURIComponent(storageKey)}`;
+      return NextResponse.json({
+        success: true,
+        uploadUrl,
+        storageKey,
+        storageAccount: 'account2',
+      });
+    } catch {
+      return NextResponse.json(
+        { success: false, error: { message: 'Failed to initiate embed thumbnail upload' } },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 15. Attach Embed Thumbnail: POST /api/embeds/:id/thumbnail
+  if (slug.length === 3 && slug[0] === 'embeds' && slug[2] === 'thumbnail') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+    const embedId = slug[1];
+    try {
+      const body = await req.json();
+      const thumbKey = body.thumbnailKey;
+      if (!thumbKey) {
+        return NextResponse.json(
+          { success: false, error: { message: 'thumbnailKey is required' } },
+          { status: 400 }
+        );
+      }
+      const thumbUrl = `/api/upload-receiver?key=${encodeURIComponent(thumbKey)}`;
+      const col = await getMongoEmbedsCollection();
+      if (col && mongoose.Types.ObjectId.isValid(embedId)) {
+        const updated = await col.findOneAndUpdate(
+          { _id: new mongoose.Types.ObjectId(embedId) },
+          {
+            $set: {
+              thumbnailKey: thumbKey,
+              thumbnailStorageAccount: body.storageAccount || 'account2',
+              thumbnailUrl: thumbUrl,
+              ...(body.blurhash ? { blurhash: body.blurhash } : {}),
+              updatedAt: new Date(),
+            },
+          },
+          { returnDocument: 'after' }
+        );
+        if (updated) {
+          const embed = await hydrateEmbedItem(updated);
+          return NextResponse.json({ success: true, embed, thumbnailUrl: embed.thumbnailUrl || thumbUrl });
+        }
+      }
+      const local = globalEmbedVideos.get(embedId);
+      if (!local) {
+        return NextResponse.json(
+          { success: false, error: { message: 'Embedded video not found' } },
+          { status: 404 }
+        );
+      }
+      local.thumbnailKey = thumbKey;
+      local.thumbnailStorageAccount = body.storageAccount || 'account2';
+      if (body.blurhash) local.blurhash = body.blurhash;
+      local.thumbnailUrl = thumbUrl;
+      local.updatedAt = new Date().toISOString();
+      saveEmbedVideosToDisk();
+      return NextResponse.json({ success: true, embed: await hydrateEmbedItem(local), thumbnailUrl: thumbUrl });
+    } catch {
+      return NextResponse.json(
+        { success: false, error: { message: 'Failed to attach embed thumbnail' } },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 16. Record Embed Play: POST /api/embeds/:id/play
+  if (slug.length === 3 && slug[0] === 'embeds' && slug[2] === 'play') {
+    const embedId = slug[1];
+    const col = await getMongoEmbedsCollection();
+    if (col && mongoose.Types.ObjectId.isValid(embedId)) {
+      try {
+        const updated = await col.findOneAndUpdate(
+          { _id: new mongoose.Types.ObjectId(embedId) },
+          { $inc: { playCount: 1 }, $set: { lastPlayedAt: new Date(), updatedAt: new Date() } },
+          { returnDocument: 'after' }
+        );
+        if (updated) {
+          return NextResponse.json({ success: true, playCount: updated.playCount || 1 });
+        }
+      } catch {}
+    }
+    const local = globalEmbedVideos.get(embedId);
+    if (local) {
+      local.playCount = (local.playCount || 0) + 1;
+      local.lastPlayedAt = new Date().toISOString();
+      saveEmbedVideosToDisk();
+      return NextResponse.json({ success: true, playCount: local.playCount });
+    }
+    return NextResponse.json({ success: false, error: { message: 'Embedded video not found' } }, { status: 404 });
+  }
+
+  // 17. Refresh Embed Metadata: POST /api/embeds/:id/refresh
+  if (slug.length === 3 && slug[0] === 'embeds' && slug[2] === 'refresh') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json({ success: false, error: { message: 'Unauthorized' } }, { status: 401 });
+    }
+    const embedId = slug[1];
+    const col = await getMongoEmbedsCollection();
+    if (col && mongoose.Types.ObjectId.isValid(embedId)) {
+      try {
+        const existing = await col.findOne({ _id: new mongoose.Types.ObjectId(embedId) });
+        if (existing) {
+          const extracted = await extractEmbedMetadata(existing.sourceUrl);
+          const setFields: any = {
+            playbackType: extracted.playbackType,
+            updatedAt: new Date(),
+          };
+          if (extracted.embedUrl) setFields.embedUrl = extracted.embedUrl;
+          if (extracted.directMediaUrl) setFields.directMediaUrl = extracted.directMediaUrl;
+          if (!existing.thumbnailKey && extracted.thumbnailUrl) setFields.thumbnailUrl = extracted.thumbnailUrl;
+          if (extracted.duration > 0) setFields.duration = extracted.duration;
+          if (extracted.description && !existing.description) setFields.description = extracted.description;
+          const updated = await col.findOneAndUpdate(
+            { _id: existing._id },
+            { $set: setFields },
+            { returnDocument: 'after' }
+          );
+          return NextResponse.json({ success: true, embed: await hydrateEmbedItem(updated || existing) });
+        }
+      } catch (e: any) {
+        return NextResponse.json({ success: false, error: { message: e?.message || 'Refresh failed' } }, { status: 500 });
+      }
+    }
+    const local = globalEmbedVideos.get(embedId);
+    if (!local) {
+      return NextResponse.json({ success: false, error: { message: 'Embedded video not found' } }, { status: 404 });
+    }
+    try {
+      const extracted = await extractEmbedMetadata(local.sourceUrl);
+      if (extracted.embedUrl) local.embedUrl = extracted.embedUrl;
+      if (extracted.directMediaUrl) local.directMediaUrl = extracted.directMediaUrl;
+      local.playbackType = extracted.playbackType;
+      if (!local.thumbnailKey && extracted.thumbnailUrl) local.thumbnailUrl = extracted.thumbnailUrl;
+      if (extracted.duration > 0) local.duration = extracted.duration;
+      if (extracted.description && !local.description) local.description = extracted.description;
+      local.updatedAt = new Date().toISOString();
+      saveEmbedVideosToDisk();
+      return NextResponse.json({ success: true, embed: await hydrateEmbedItem(local) });
+    } catch (e: any) {
+      return NextResponse.json({ success: false, error: { message: e?.message || 'Refresh failed' } }, { status: 500 });
+    }
+  }
+
   return NextResponse.json(
     { success: false, error: { message: `Route not found: ${path}` } },
     { status: 404 }
@@ -2710,6 +3270,63 @@ export async function PATCH(
     });
   }
 
+  // 5. Update Embed Video Metadata: PATCH /api/embeds/:id
+  if (slug.length === 2 && slug[0] === 'embeds') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    const embedId = slug[1];
+    const body = await req.json();
+    const col = await getMongoEmbedsCollection();
+    if (col && mongoose.Types.ObjectId.isValid(embedId)) {
+      try {
+        const updateFields: any = { updatedAt: new Date() };
+        if (typeof body.title === 'string' && body.title.trim()) updateFields.title = body.title.trim();
+        if (Array.isArray(body.tags)) updateFields.tags = body.tags;
+        if (typeof body.notes === 'string') updateFields.notes = body.notes;
+        if (typeof body.favorite === 'boolean') updateFields.favorite = body.favorite;
+        if (typeof body.embedUrl === 'string') updateFields.embedUrl = body.embedUrl.trim() || undefined;
+        if (typeof body.directMediaUrl === 'string') updateFields.directMediaUrl = body.directMediaUrl.trim() || undefined;
+        if (typeof body.thumbnailUrl === 'string' && body.thumbnailUrl.trim()) {
+          updateFields.thumbnailUrl = body.thumbnailUrl.trim();
+        }
+        const updated = await col.findOneAndUpdate(
+          { _id: new mongoose.Types.ObjectId(embedId) },
+          { $set: updateFields },
+          { returnDocument: 'after' }
+        );
+        if (updated) {
+          return NextResponse.json({ success: true, embed: await hydrateEmbedItem(updated) });
+        }
+      } catch {}
+    }
+
+    const local = globalEmbedVideos.get(embedId);
+    if (!local) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Embedded video not found' } },
+        { status: 404 }
+      );
+    }
+    if (typeof body.title === 'string' && body.title.trim()) local.title = body.title.trim();
+    if (Array.isArray(body.tags)) local.tags = body.tags;
+    if (typeof body.notes === 'string') local.notes = body.notes;
+    if (typeof body.favorite === 'boolean') local.favorite = body.favorite;
+    if (typeof body.embedUrl === 'string') local.embedUrl = body.embedUrl.trim() || undefined;
+    if (typeof body.directMediaUrl === 'string') local.directMediaUrl = body.directMediaUrl.trim() || undefined;
+    if (typeof body.thumbnailUrl === 'string' && body.thumbnailUrl.trim()) {
+      local.thumbnailUrl = body.thumbnailUrl.trim();
+    }
+    local.updatedAt = new Date().toISOString();
+    saveEmbedVideosToDisk();
+    return NextResponse.json({ success: true, embed: await hydrateEmbedItem(local) });
+  }
+
   return NextResponse.json(
     { success: false, error: { message: `Route not found: ${path}` } },
     { status: 404 }
@@ -2750,6 +3367,38 @@ export async function DELETE(
       success: true,
       message: 'Video and storage objects permanently deleted.',
     });
+  }
+
+  // Delete Embed Video: DELETE /api/embeds/:id
+  if (slug.length === 2 && slug[0] === 'embeds') {
+    const userAuth = checkRequestAuth(req);
+    if (!userAuth) {
+      return NextResponse.json(
+        { success: false, error: { message: 'Unauthorized' } },
+        { status: 401 }
+      );
+    }
+
+    const embedId = slug[1];
+    const col = await getMongoEmbedsCollection();
+    if (col && mongoose.Types.ObjectId.isValid(embedId)) {
+      try {
+        const del = await col.deleteOne({ _id: new mongoose.Types.ObjectId(embedId) });
+        if (del.deletedCount > 0) {
+          return NextResponse.json({ success: true, message: 'Embedded video deleted.' });
+        }
+      } catch {}
+    }
+
+    if (globalEmbedVideos.has(embedId)) {
+      globalEmbedVideos.delete(embedId);
+      saveEmbedVideosToDisk();
+      return NextResponse.json({ success: true, message: 'Embedded video deleted.' });
+    }
+    return NextResponse.json(
+      { success: false, error: { message: 'Embedded video not found' } },
+      { status: 404 }
+    );
   }
 
   return NextResponse.json(

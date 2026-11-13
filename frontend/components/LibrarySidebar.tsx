@@ -17,6 +17,7 @@ import {
   X,
   FolderHeart,
   ListMusic,
+  Tv,
 } from 'lucide-react';
 import {
   getStoredSidebarCollapsed,
@@ -36,6 +37,7 @@ export type LibraryNavSection =
   | 'playlists'
   | 'vault'
   | 'drive'
+  | 'embeds'
   | 'settings';
 
 export interface LibrarySidebarCounts {
@@ -47,6 +49,7 @@ export interface LibrarySidebarCounts {
   collections?: number;
   playlists?: number;
   drive?: number;
+  embeds?: number;
   vault?: number;
 }
 
@@ -71,6 +74,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
 }) => {
   const pathname = usePathname();
   const isDrivePage = pathname.startsWith('/drive');
+  const isEmbedsPage = pathname.startsWith('/embeds');
   const isSettingsPage = pathname.startsWith('/settings');
 
   // Persisted collapse state on desktop (hydration-safe)
@@ -171,7 +175,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
           )}
           <button
             onClick={() => onSelectSection?.('home')}
-            className={`w-full ${navItemClass(activeSection === 'home' && !isDrivePage && !isSettingsPage)}`}
+            className={`w-full ${navItemClass(activeSection === 'home' && !isDrivePage && !isEmbedsPage && !isSettingsPage)}`}
             aria-label="All Videos"
           >
             <Film className="w-[18px] h-[18px] shrink-0" />
@@ -294,7 +298,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
               onSelectSection?.('vault');
               onCloseMobileDrawer?.();
             }}
-            className={`w-full ${navItemClass(!isDrivePage && !isSettingsPage && activeSection === 'vault')}`}
+            className={`w-full ${navItemClass(!isDrivePage && !isEmbedsPage && !isSettingsPage && activeSection === 'vault')}`}
             aria-label="Vault Storage"
           >
             <FolderLock className="w-[18px] h-[18px] shrink-0 text-amber-400" />
@@ -324,6 +328,29 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
               </div>
             )}
             {renderTooltip('Google Drive')}
+          </Link>
+
+          <Link
+            href="/embeds"
+            onClick={() => {
+              onSelectSection?.('embeds');
+              onCloseMobileDrawer?.();
+            }}
+            className={`w-full ${navItemClass(isEmbedsPage)}`}
+            aria-label="Embed Videos"
+          >
+            <Tv className="w-[18px] h-[18px] shrink-0 text-emerald-400" />
+            {!isCollapsed && (
+              <div className="flex items-center justify-between w-full">
+                <span>Embed Videos</span>
+                {counts.embeds !== undefined && counts.embeds > 0 ? (
+                  <span className="text-xs font-mono text-[#73798B] tabular-nums">{counts.embeds}</span>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-mono font-medium">Links</span>
+                )}
+              </div>
+            )}
+            {renderTooltip('Embed Videos')}
           </Link>
         </div>
 

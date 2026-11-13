@@ -1,4 +1,4 @@
-import { IVideo, ISettings, HomeSections, VideoListResponse, IDriveVideo, DriveVideoListResponse } from '../types';
+import { IVideo, ISettings, HomeSections, VideoListResponse, IDriveVideo, DriveVideoListResponse, IEmbedVideo, EmbedVideoListResponse } from '../types';
 
 const API_BASE_URL = typeof window !== 'undefined'
   ? (process.env.NEXT_PUBLIC_BACKEND_URL ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api` : '/api')
@@ -584,6 +584,102 @@ class ApiClient {
     title: string;
   }> {
     return this.request(`/drive/videos/${id}/stream`, { method: 'GET' });
+  }
+
+  // ── Embedded External Videos (Separate Module) ──
+
+  async listEmbeds(params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    sort?: string;
+    filter?: string;
+  } = {}): Promise<EmbedVideoListResponse> {
+    const query = new URLSearchParams();
+    if (params.page) query.append('page', params.page.toString());
+    if (params.limit) query.append('limit', params.limit.toString());
+    if (params.search) query.append('search', params.search);
+    if (params.sort) query.append('sort', params.sort);
+    if (params.filter) query.append('filter', params.filter);
+    const qs = query.toString();
+    return this.request<EmbedVideoListResponse>(`/embeds${qs ? `?${qs}` : ''}`, { method: 'GET' });
+  }
+
+  async createEmbed(payload: {
+    url: string;
+    title?: string;
+    tags?: string[] | string;
+    notes?: string;
+    embedUrl?: string;
+  }): Promise<{ success: boolean; embed: IEmbedVideo; updatedExisting?: boolean }> {
+    return this.request('/embeds', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getEmbedDetails(id: string): Promise<{ success: boolean; embed: IEmbedVideo }> {
+    return this.request(`/embeds/${id}`, { method: 'GET' });
+  }
+
+  async updateEmbedMetadata(
+    id: string,
+    payload: {
+      title?: string;
+      tags?: string[];
+      notes?: string;
+      favorite?: boolean;
+      embedUrl?: string;
+      directMediaUrl?: string;
+      thumbnailUrl?: string;
+    }
+  ): Promise<{ success: boolean; embed: IEmbedVideo }> {
+    return this.request(`/embeds/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteEmbed(id: string): Promise<{ success: boolean; message: string }> {
+    return this.request(`/embeds/${id}`, { method: 'DELETE' });
+  }
+
+  async recordEmbedPlay(id: string): Promise<{ success: boolean; playCount: number }> {
+    return this.request(`/embeds/${id}/play`, { method: 'POST' });
+  }
+
+  async refreshEmbedMetadata(id: string): Promise<{ success: boolean; embed: IEmbedVideo }> {
+    return this.request(`/embeds/${id}/refresh`, { method: 'POST' });
+  }
+
+  async initiateEmbedThumbnailUpload(payload: {
+    filename?: string;
+    mimeType?: string;
+    embedId?: string;
+  }): Promise<{
+    success: boolean;
+    uploadUrl: string;
+    storageKey: string;
+    storageAccount: string;
+  }> {
+    return this.request('/embeds/thumbnails/upload/initiate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async attachEmbedThumbnail(
+    id: string,
+    payload: {
+      thumbnailKey: string;
+      blurhash?: string;
+      storageAccount?: string;
+    }
+  ): Promise<{ success: boolean; embed: IEmbedVideo; thumbnailUrl: string }> {
+    return this.request(`/embeds/${id}/thumbnail`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 }
 

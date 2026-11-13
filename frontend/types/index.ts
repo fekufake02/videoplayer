@@ -124,3 +124,37 @@ export interface IPlaylist {
   createdAt: string;
   updatedAt: string;
 }
+
+export type EmbedPlaybackType = 'iframe' | 'direct' | 'hybrid';
+
+export interface IEmbedVideo {
+  _id: string;
+  sourceUrl: string;
+  embedUrl?: string;
+  directMediaUrl?: string;
+  playbackType: EmbedPlaybackType;
+  platform: string;
+  sourceDomain: string;
+  title: string;
+  description?: string;
+  thumbnailUrl?: string;
+  thumbnailKey?: string;
+  thumbnailStorageAccount?: 'account1' | 'account2';
+  blurhash?: string;
+  duration: number;
+  playCount: number;
+  favorite: boolean;
+  tags: string[];
+  notes?: string;
+  lastPlayedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EmbedVideoListResponse {
+  success: boolean;
+  embeds: IEmbedVideo[];
+  total: number;
+  page: number;
+  totalPages: number;
+}

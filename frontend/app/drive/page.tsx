@@ -203,6 +203,10 @@ export default function DriveGalleryPage() {
           activeSection="drive"
           onSelectSection={(sec) => {
             if (sec === 'drive') return;
+            if (sec === 'embeds') {
+              router.push('/embeds');
+              return;
+            }
             if (sec === 'settings') {
               router.push('/settings');
               return;

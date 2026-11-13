@@ -4,6 +4,7 @@ import * as videoController from '../controllers/videoController';
 import * as settingsController from '../controllers/settingsController';
 import * as thumbnailController from '../controllers/thumbnailController';
 import * as driveController from '../controllers/driveController';
+import * as embedController from '../controllers/embedController';
 import { requireAuth, optionalAuth } from '../middleware/auth';
 import { loginLimiter } from '../middleware/rateLimiter';
 
@@ -61,5 +62,16 @@ router.post('/drive/thumbnails/upload/initiate', requireAuth, driveController.in
 router.post('/drive/videos/:id/thumbnail', requireAuth, driveController.attachDriveThumbnail);
 router.get('/drive/videos/:id/stream', requireAuth, driveController.getDriveStreamUrl);
 router.get('/drive/videos/:id/chunk-stream', driveController.streamDriveVideoChunk);
+
+// Embedded External Videos Routes (Separate Module)
+router.get('/embeds', requireAuth, embedController.listEmbeds);
+router.post('/embeds', requireAuth, embedController.createEmbed);
+router.post('/embeds/thumbnails/upload/initiate', requireAuth, embedController.initiateEmbedThumbnailUpload);
+router.get('/embeds/:id', requireAuth, embedController.getEmbedDetails);
+router.patch('/embeds/:id', requireAuth, embedController.updateEmbedMetadata);
+router.delete('/embeds/:id', requireAuth, embedController.deleteEmbed);
+router.post('/embeds/:id/play', requireAuth, embedController.recordEmbedPlay);
+router.post('/embeds/:id/refresh', requireAuth, embedController.refreshEmbedMetadata);
+router.post('/embeds/:id/thumbnail', requireAuth, embedController.attachEmbedThumbnail);
 
 export default router;
