@@ -47,6 +47,8 @@ import {
   ShieldCheck,
   Download,
   X,
+  PictureInPicture2,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 function formatTime(seconds: number): string {
@@ -128,6 +130,10 @@ export default function EmbedWatchPage() {
   const retriedRefreshForIdRef = useRef<string | null>(null);
   const persistedDiscoveredRef = useRef<string | null>(null);
   const downloadAbortRef = useRef<AbortController | null>(null);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekBarRef = useRef<HTMLDivElement | null>(null);
+  const isScrubbingRef = useRef<boolean>(false);
 
   const [previewStrategyIndex, setPreviewStrategyIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -136,9 +142,17 @@ export default function EmbedWatchPage() {
   const [volume, setVolume] = useState(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [bufferedPercent, setBufferedPercent] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewError, setPreviewError] = useState('');
+  const [showControls, setShowControls] = useState(true);
+  const [hoverSeekInfo, setHoverSeekInfo] = useState<{ time: number; pct: number } | null>(null);
+  const [skipFlash, setSkipFlash] = useState<string | null>(null);
+  const [hlsLevels, setHlsLevels] = useState<{ index: number; label: string }[]>([]);
+  const [selectedHlsLevel, setSelectedHlsLevel] = useState<number>(-1);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [pipSupported, setPipSupported] = useState(false);
 
   // Client download state (zero server streaming)
   const [downloadProgress, setDownloadProgress] = useState<ClientDownloadProgress | null>(null);
@@ -390,6 +404,10 @@ export default function EmbedWatchPage() {
     const targetSrc = buildSrc(currentStrategy);
     setPreviewError('');
     setIsBuffering(true);
+    setHlsLevels([]);
+    setSelectedHlsLevel(-1);
+    setShowQualityMenu(false);
+    setBufferedPercent(0);
 
     const attachHls = (srcToLoad: string) => {
       if (Hls.isSupported()) {
@@ -400,9 +418,25 @@ export default function EmbedWatchPage() {
         hlsRef.current = hls;
         hls.loadSource(srcToLoad);
         hls.attachMedia(videoEl);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
           if (cancelled) return;
           setIsBuffering(false);
+          if (Array.isArray(data?.levels) && data.levels.length > 1) {
+            const seen = new Set<string>();
+            const levels = data.levels
+              .map((lvl, idx) => {
+                const label = lvl.height ? `${lvl.height}p` : `${Math.round((lvl.bitrate || 0) / 1000)}k`;
+                return { index: idx, height: lvl.height || 0, label };
+              })
+              .sort((a, b) => b.height - a.height)
+              .filter((item) => {
+                if (seen.has(item.label)) return false;
+                seen.add(item.label);
+                return true;
+              })
+              .map(({ index, label }) => ({ index, label }));
+            setHlsLevels(levels);
+          }
           videoEl.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
@@ -478,7 +512,40 @@ export default function EmbedWatchPage() {
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onFsChange);
+    setPipSupported(typeof document !== 'undefined' && Boolean(document.pictureInPictureEnabled));
     return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const revealControls = useCallback(
+    (playingOverride?: boolean) => {
+      setShowControls(true);
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      const playingNow = typeof playingOverride === 'boolean' ? playingOverride : isPlaying;
+      if (playingNow && !showQualityMenu) {
+        controlsTimerRef.current = setTimeout(() => {
+          setShowControls(false);
+        }, 2500);
+      }
+    },
+    [isPlaying, showQualityMenu]
+  );
+
+  useEffect(() => {
+    if (!isPlaying || showQualityMenu || previewError) {
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      setShowControls(true);
+    } else {
+      revealControls(true);
+    }
+    return () => {
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    };
+  }, [isPlaying, showQualityMenu, previewError, revealControls]);
+
+  const triggerSkipFlash = useCallback((label: string) => {
+    setSkipFlash(label);
+    if (skipFlashTimerRef.current) clearTimeout(skipFlashTimerRef.current);
+    skipFlashTimerRef.current = setTimeout(() => setSkipFlash(null), 650);
   }, []);
 
   useEffect(() => {
@@ -490,6 +557,7 @@ export default function EmbedWatchPage() {
       }
       const v = videoRef.current;
       if (!v) return;
+      revealControls();
       if (e.key === ' ' || e.key.toLowerCase() === 'k') {
         e.preventDefault();
         if (v.paused) v.play().catch(() => {});
@@ -497,15 +565,19 @@ export default function EmbedWatchPage() {
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         v.currentTime = Math.max(0, v.currentTime - 5);
+        triggerSkipFlash('-5s');
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         v.currentTime = Math.min(v.duration || 0, v.currentTime + 5);
+        triggerSkipFlash('+5s');
       } else if (e.key.toLowerCase() === 'j') {
         e.preventDefault();
         v.currentTime = Math.max(0, v.currentTime - 10);
+        triggerSkipFlash('-10s');
       } else if (e.key.toLowerCase() === 'l') {
         e.preventDefault();
         v.currentTime = Math.min(v.duration || 0, v.currentTime + 10);
+        triggerSkipFlash('+10s');
       } else if (e.key.toLowerCase() === 'm') {
         e.preventDefault();
         v.muted = !v.muted;
@@ -521,7 +593,7 @@ export default function EmbedWatchPage() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeMode]);
+  }, [activeMode, revealControls, triggerSkipFlash]);
 
   const sendEmbedCmd = (cmd: string, delta?: number) => {
     try {
@@ -532,6 +604,7 @@ export default function EmbedWatchPage() {
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
+    revealControls();
     if (v.paused) {
       v.play().catch(() => {});
     } else {
@@ -542,17 +615,24 @@ export default function EmbedWatchPage() {
   const skipSeconds = (delta: number) => {
     const v = videoRef.current;
     if (!v) return;
+    revealControls();
     const target = Math.max(0, Math.min(v.duration || duration || 0, v.currentTime + delta));
     v.currentTime = target;
     setCurrentTime(target);
+    triggerSkipFlash(delta > 0 ? `+${delta}s` : `${delta}s`);
   };
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    if (videoRef.current) {
-      videoRef.current.currentTime = val;
+  const updateSeekFromClientX = (clientX: number, commitSeek: boolean) => {
+    const bar = seekBarRef.current;
+    if (!bar || !duration) return;
+    const rect = bar.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    const target = pct * duration;
+    setHoverSeekInfo({ time: target, pct: pct * 100 });
+    if (commitSeek) {
+      if (videoRef.current) videoRef.current.currentTime = target;
+      setCurrentTime(target);
     }
-    setCurrentTime(val);
   };
 
   const toggleMute = () => {
@@ -577,6 +657,26 @@ export default function EmbedWatchPage() {
     const next = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.length];
     setPlaybackSpeed(next);
     if (videoRef.current) videoRef.current.playbackRate = next;
+  };
+
+  const handleSelectHlsLevel = (levelIndex: number) => {
+    setSelectedHlsLevel(levelIndex);
+    setShowQualityMenu(false);
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = levelIndex;
+    }
+  };
+
+  const togglePictureInPicture = async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (v.requestPictureInPicture) {
+        await v.requestPictureInPicture();
+      }
+    } catch {}
   };
 
   const toggleFullscreen = () => {
@@ -1004,8 +1104,8 @@ export default function EmbedWatchPage() {
             <div
               className={
                 isFullscreen
-                  ? 'relative flex-1 w-full overflow-hidden bg-black flex items-center justify-center'
-                  : 'relative w-full aspect-video max-h-[75vh] overflow-hidden bg-black flex items-center justify-center'
+                  ? 'relative flex-1 w-full min-h-0 overflow-hidden bg-black'
+                  : 'relative w-full aspect-video max-h-[75vh] overflow-hidden bg-black'
               }
             >
               {!embedLoaded && (
@@ -1024,7 +1124,7 @@ export default function EmbedWatchPage() {
                 key={`${embed._id}-${embedSubMode}-${embedKey}`}
                 src={activeEmbedIframeSrc}
                 onLoad={() => setEmbedLoaded(true)}
-                className="w-full h-full max-w-full max-h-full border-0 block"
+                className="absolute inset-0 w-full h-full border-0 block"
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                 allowFullScreen
                 referrerPolicy="no-referrer-when-downgrade"
@@ -1150,14 +1250,19 @@ export default function EmbedWatchPage() {
             </div>
           </div>
         ) : (
-          /* Direct Preview Player — Strictly Contained Within Player Window */
+          /* Direct Preview Player — Strictly Contained & Centered Within Player Window */
           <div
             ref={containerRef}
-            className={
+            onMouseMove={() => revealControls()}
+            onMouseLeave={() => {
+              if (isPlaying && !showQualityMenu) setShowControls(false);
+            }}
+            onTouchStart={() => revealControls()}
+            className={`${
               isFullscreen
-                ? 'relative w-screen h-screen bg-black overflow-hidden flex items-center justify-center select-none'
-                : 'relative w-full aspect-video max-h-[75vh] bg-black rounded-xl overflow-hidden border border-white/[0.08] shadow-2xl group flex items-center justify-center select-none'
-            }
+                ? 'relative w-screen h-screen bg-black overflow-hidden select-none'
+                : 'relative w-full aspect-video max-h-[75vh] bg-black rounded-xl overflow-hidden border border-white/[0.08] shadow-2xl select-none'
+            } ${!showControls && isPlaying ? 'cursor-none' : ''}`}
           >
             <video
               ref={videoRef}
@@ -1172,22 +1277,47 @@ export default function EmbedWatchPage() {
                   setIsBuffering(false);
                 }
               }}
+              onProgress={() => {
+                const v = videoRef.current;
+                if (v && v.duration > 0 && v.buffered.length > 0) {
+                  const end = v.buffered.end(v.buffered.length - 1);
+                  setBufferedPercent(Math.min(100, (end / v.duration) * 100));
+                }
+              }}
               onTimeUpdate={() => {
-                if (videoRef.current) setCurrentTime(videoRef.current.currentTime || 0);
+                const v = videoRef.current;
+                if (v) {
+                  setCurrentTime(v.currentTime || 0);
+                  if (v.duration > 0 && v.buffered.length > 0) {
+                    const end = v.buffered.end(v.buffered.length - 1);
+                    setBufferedPercent(Math.min(100, (end / v.duration) * 100));
+                  }
+                }
               }}
               onPlaying={() => {
                 setIsPlaying(true);
                 setIsBuffering(false);
                 setPreviewError('');
+                revealControls(true);
               }}
-              onPause={() => setIsPlaying(false)}
+              onPause={() => {
+                setIsPlaying(false);
+                setShowControls(true);
+              }}
               onWaiting={() => setIsBuffering(true)}
               onCanPlay={() => setIsBuffering(false)}
               onError={() => {
                 advancePreviewStrategy();
               }}
-              className="w-full h-full max-w-full max-h-full object-contain cursor-pointer block"
+              className="absolute inset-0 w-full h-full object-contain object-center cursor-pointer block"
             />
+
+            {/* Skip Flash Feedback Pill */}
+            {skipFlash && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none px-4 py-2 rounded-xl bg-black/75 border border-white/15 text-white text-sm font-mono font-bold shadow-xl backdrop-blur-md">
+                {skipFlash}
+              </div>
+            )}
 
             {/* Centered Play Button Overlay when paused */}
             {!isPlaying && !isBuffering && !previewError && (
@@ -1250,20 +1380,70 @@ export default function EmbedWatchPage() {
               </div>
             )}
 
-            {/* Controls Bar — overlaid inside bottom edge */}
-            <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/75 to-transparent px-4 pt-10 pb-3 space-y-2">
-              <input
-                type="range"
-                min={0}
-                max={duration || 100}
-                step={0.1}
-                value={currentTime}
-                onChange={handleSeek}
-                className="w-full h-1.5 accent-indigo-500 cursor-pointer"
+            {/* Production-Grade Controls Bar — auto-hides on idle during playback */}
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/75 to-transparent px-3.5 sm:px-4 pt-12 pb-3 space-y-2 transition-opacity duration-300 ${
+                showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
+            >
+              {/* Custom Scrubber with Buffered Range & Hover Time Tooltip */}
+              <div
+                ref={seekBarRef}
+                role="slider"
                 aria-label="Seek timeline"
-              />
+                aria-valuemin={0}
+                aria-valuemax={duration || 100}
+                aria-valuenow={currentTime}
+                tabIndex={0}
+                onPointerDown={(e) => {
+                  isScrubbingRef.current = true;
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  updateSeekFromClientX(e.clientX, true);
+                  revealControls();
+                }}
+                onPointerMove={(e) => {
+                  updateSeekFromClientX(e.clientX, isScrubbingRef.current);
+                }}
+                onPointerUp={(e) => {
+                  if (isScrubbingRef.current) {
+                    isScrubbingRef.current = false;
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                    updateSeekFromClientX(e.clientX, true);
+                  }
+                }}
+                onPointerLeave={() => {
+                  isScrubbingRef.current = false;
+                  setHoverSeekInfo(null);
+                }}
+                className="relative w-full py-2 cursor-pointer group/seek touch-none"
+              >
+                {hoverSeekInfo && duration > 0 && (
+                  <div
+                    className="absolute -top-7 -translate-x-1/2 px-2 py-0.5 rounded bg-[#090A0F]/95 border border-white/15 text-[11px] font-mono text-white tabular-nums pointer-events-none shadow-lg"
+                    style={{ left: `${Math.min(96, Math.max(4, hoverSeekInfo.pct))}%` }}
+                  >
+                    {formatTime(hoverSeekInfo.time)}
+                  </div>
+                )}
+                <div className="relative w-full h-1.5 group-hover/seek:h-2 transition-all bg-white/20 rounded-full overflow-hidden">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-white/30 rounded-full transition-all duration-150"
+                    style={{ width: `${bufferedPercent}%` }}
+                  />
+                  <div
+                    className="absolute inset-y-0 left-0 bg-indigo-500 rounded-full"
+                    style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
+                  />
+                </div>
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-indigo-400 shadow-md ring-2 ring-white/80 opacity-0 group-hover/seek:opacity-100 transition-opacity pointer-events-none"
+                  style={{ left: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
+                />
+              </div>
+
               <div className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-1.5 sm:gap-2">
+                <div className="flex items-center gap-1 sm:gap-2">
                   <button
                     type="button"
                     onClick={togglePlay}
@@ -1272,13 +1452,13 @@ export default function EmbedWatchPage() {
                   >
                     {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
                   </button>
-                  <button type="button" onClick={() => skipSeconds(-10)} className="p-1.5 text-slate-300 hover:text-white cursor-pointer" title="Back 10s">
+                  <button type="button" onClick={() => skipSeconds(-10)} className="p-1.5 text-slate-300 hover:text-white cursor-pointer" title="Back 10s (J)">
                     <RotateCcw className="w-4 h-4" />
                   </button>
-                  <button type="button" onClick={() => skipSeconds(10)} className="p-1.5 text-slate-300 hover:text-white cursor-pointer" title="Forward 10s">
+                  <button type="button" onClick={() => skipSeconds(10)} className="p-1.5 text-slate-300 hover:text-white cursor-pointer" title="Forward 10s (L)">
                     <RotateCw className="w-4 h-4" />
                   </button>
-                  <div className="flex items-center gap-1.5 ml-1">
+                  <div className="flex items-center gap-1.5 ml-0.5 sm:ml-1">
                     <button type="button" onClick={toggleMute} className="p-1 text-slate-300 hover:text-white cursor-pointer" aria-label={isMuted ? 'Unmute' : 'Mute'}>
                       {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                     </button>
@@ -1298,7 +1478,50 @@ export default function EmbedWatchPage() {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 relative">
+                  {hlsLevels.length > 1 && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowQualityMenu((q) => !q)}
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-[11px] font-mono text-slate-200 cursor-pointer"
+                        title="Video quality"
+                      >
+                        <SlidersHorizontal className="w-3 h-3 text-indigo-300" />
+                        <span>
+                          {selectedHlsLevel === -1
+                            ? 'Auto'
+                            : hlsLevels.find((l) => l.index === selectedHlsLevel)?.label || 'HD'}
+                        </span>
+                      </button>
+                      {showQualityMenu && (
+                        <div className="absolute right-0 bottom-full mb-2 w-28 bg-[#131620] border border-white/[0.12] rounded-xl py-1 shadow-2xl z-30 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectHlsLevel(-1)}
+                            className={`w-full px-3 py-1.5 text-left hover:bg-white/[0.08] cursor-pointer ${
+                              selectedHlsLevel === -1 ? 'text-indigo-300 font-semibold' : 'text-slate-300'
+                            }`}
+                          >
+                            Auto
+                          </button>
+                          {hlsLevels.map((lvl) => (
+                            <button
+                              key={lvl.index}
+                              type="button"
+                              onClick={() => handleSelectHlsLevel(lvl.index)}
+                              className={`w-full px-3 py-1.5 text-left hover:bg-white/[0.08] cursor-pointer ${
+                                selectedHlsLevel === lvl.index ? 'text-indigo-300 font-semibold' : 'text-slate-300'
+                              }`}
+                            >
+                              {lvl.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     onClick={cycleSpeed}
@@ -1307,6 +1530,19 @@ export default function EmbedWatchPage() {
                   >
                     {playbackSpeed}x
                   </button>
+
+                  {pipSupported && (
+                    <button
+                      type="button"
+                      onClick={togglePictureInPicture}
+                      className="p-1.5 text-slate-300 hover:text-white cursor-pointer hidden sm:inline-flex"
+                      title="Picture in Picture"
+                      aria-label="Picture in Picture"
+                    >
+                      <PictureInPicture2 className="w-4 h-4" />
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={toggleFullscreen}

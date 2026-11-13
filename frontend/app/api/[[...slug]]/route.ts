@@ -1814,28 +1814,19 @@ export async function GET(
 
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3500);
-      let resp = await fetch(parsedUrl.toString(), {
-        method: 'HEAD',
+      const timer = setTimeout(() => ctrl.abort(), 4500);
+      const resp = await fetch(parsedUrl.toString(), {
+        method: 'GET',
         redirect: 'follow',
         signal: ctrl.signal,
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
         },
       });
-      if (resp.status === 405 || resp.status === 403) {
-        resp = await fetch(parsedUrl.toString(), {
-          method: 'GET',
-          redirect: 'follow',
-          signal: ctrl.signal,
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          },
-        });
-        await resp.body?.cancel().catch(() => {});
-      }
+      await resp.body?.cancel().catch(() => {});
       clearTimeout(timer);
 
       const xfo = (resp.headers.get('x-frame-options') || '').toLowerCase();
